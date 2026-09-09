@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: retalio-postgres
+    environment:
+      POSTGRES_USER: retalio
+      POSTGRES_PASSWORD: retalio
+      POSTGRES_DB: retalio
+    ports:
+      - "5432:5432"
+    volumes:
+      - retalio-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U retalio -d retalio"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Opsional — cache AI gateway default in-memory; aktifkan Redis untuk produksi
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: retalio-redis
+  #   ports:
+  #     - "6379:6379"
+
+volumes:
+  retalio-pgdata:

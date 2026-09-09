@@ -1,0 +1,29 @@
+# Dependencies
+node_modules
+pnpm-lockfile
+yarn-lock
+
+# Production builds
+dist
+dist-ssr
+
+# Local overrides
+*.local
+.DS_Store
+
+# Environment variables (never commit these)
+.env*
+# NOTE: .env.example is committed for reference
+
+# Meteor
+.meteor/
+
+# Vercel
+.vercel/
+
+# TypeScript
+*.tsbuildinfo
+*.tsbuildinfo.uploaded
+
+# Arsip referensi desain pihak ketiga (bukan kode proyek)
+reference/

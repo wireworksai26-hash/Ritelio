@@ -1,0 +1,502 @@
+// Retalio — Smart Business System
+// Skema mengikuti Database_Schema_Retalio_SBS.md:
+// multi-tenant (tenant_id di semua tabel operasional), custom fields via JSONB,
+// offline-first POS (client_generated_id + sync_status + dual timestamp).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ──────────────────────────────────────────────
+
+enum Role {
+  superadmin
+  owner
+  admin
+  manager
+  cashier
+  staff
+}
+
+enum SubscriptionPlan {
+  basic
+  plus_ai
+  custom
+}
+
+enum SyncStatus {
+  pending
+  synced
+  conflict
+  needs_review
+}
+
+enum PaymentMethod {
+  cash
+  qris
+  debit
+  transfer
+}
+
+enum POStatus {
+  draft
+  ordered
+  received
+  cancelled
+}
+
+enum MovementType {
+  sale
+  purchase
+  adjustment
+  production
+}
+
+enum InsightType {
+  low_stock_prediction
+  sales_forecast
+  anomaly
+  cashflow_forecast
+  insight_digest
+  pricing_suggestion
+  outlet_comparison
+  nlq_chat
+}
+
+enum NotificationType {
+  low_stock
+  insight_digest
+  approval
+  sync_conflict
+}
+
+enum AccountType {
+  asset
+  liability
+  equity
+  revenue
+  expense
+}
+
+// ─── Global (lintas tenant) ─────────────────────────────
+
+model Tenant {
+  id               String           @id @default(uuid())
+  name             String
+  industryTemplate String           @map("industry_template")
+  subscriptionPlan SubscriptionPlan @default(basic) @map("subscription_plan")
+  settings         Json             @default("{}")
+  createdAt        DateTime         @default(now()) @map("created_at")
+
+  subscriptions     Subscription[]
+  users             User[]
+  outlets           Outlet[]
+  modulesConfig     ModuleConfig[]
+  categories        ProductCategory[]
+  products          Product[]
+  warehouses        Warehouse[]
+  stocks            InventoryStock[]
+  movements         StockMovement[]
+  suppliers         Supplier[]
+  purchaseOrders    PurchaseOrder[]
+  customers         Customer[]
+  transactions      SalesTransaction[]
+  accounts          ChartOfAccount[]
+  entries           FinancialEntry[]
+  insights          AiInsightLog[]
+  usageCounters     AiUsageCounter[]
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+
+  @@map("tenants")
+}
+
+model Subscription {
+  id       String           @id @default(uuid())
+  tenantId String           @map("tenant_id")
+  plan     SubscriptionPlan
+  status   String           @default("active") // active | trialing | past_due | cancelled
+  aiQuota  Int              @default(0) @map("ai_quota") // kuota query AI/bulan (0 = tanpa AI)
+  startedAt DateTime        @default(now()) @map("started_at")
+  endsAt   DateTime?        @map("ends_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("subscriptions")
+}
+
+model ModuleCatalog {
+  key         String @id // inventory | pos | finance | assistant | production | booking
+  label       String
+  description String
+
+  configs ModuleConfig[]
+
+  @@map("modules_catalog")
+}
+
+// ─── Tenant-scoped ──────────────────────────────────────
+
+model ModuleConfig {
+  id             String  @id @default(uuid())
+  tenantId       String  @map("tenant_id")
+  moduleKey      String  @map("module_key")
+  isActive       Boolean @default(true) @map("is_active")
+  customFields   Json    @default("[]") // hasil Form Builder
+  workflowConfig Json    @default("{}") @map("workflow_config")
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  module ModuleCatalog @relation(fields: [moduleKey], references: [key])
+
+  @@unique([tenantId, moduleKey])
+  @@index([tenantId])
+  @@map("modules_config")
+}
+
+model User {
+  id               String  @id @default(uuid())
+  tenantId         String  @map("tenant_id")
+  name             String
+  email            String
+  passwordHash     String  @map("password_hash")
+  role             Role
+  permissions      Json    @default("{}") // override granular: {"finance:read": true/false}
+  twoFactorSecret  String? @map("two_factor_secret")
+  twoFactorEnabled Boolean @default(false) @map("two_factor_enabled")
+  isActive         Boolean @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outlets      UserOutlet[]
+  transactions SalesTransaction[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+model Outlet {
+  id       String  @id @default(uuid())
+  tenantId String  @map("tenant_id")
+  name     String
+  address  String  @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  warehouses   Warehouse[]
+  users        UserOutlet[]
+  transactions SalesTransaction[]
+
+  @@index([tenantId])
+  @@map("outlets")
+}
+
+model UserOutlet {
+  userId   String @map("user_id")
+  outletId String @map("outlet_id")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outlet Outlet @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@id([userId, outletId])
+  @@map("user_outlets")
+}
+
+model ProductCategory {
+  id       String  @id @default(uuid())
+  tenantId String  @map("tenant_id")
+  name     String
+  parentId String? @map("parent_id")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@index([tenantId])
+  @@map("product_categories")
+}
+
+model Product {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  sku          String
+  name         String
+  categoryId   String?  @map("category_id")
+  unit         String   @default("pcs")
+  sellPrice    Decimal  @map("sell_price") @db.Decimal(14, 2)
+  costPrice    Decimal  @default(0) @map("cost_price") @db.Decimal(14, 2)
+  barcode      String?
+  customFields Json     @default("{}") @map("custom_fields")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  stocks   InventoryStock[]
+  movements StockMovement[]
+  poItems  PurchaseOrderItem[]
+  txItems  SalesTransactionItem[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@index([tenantId, barcode])
+  @@map("products")
+}
+
+model Warehouse {
+  id       String  @id @default(uuid())
+  tenantId String  @map("tenant_id")
+  outletId String? @map("outlet_id")
+  name     String
+  location String  @default("")
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outlet  Outlet?          @relation(fields: [outletId], references: [id], onDelete: SetNull)
+  stocks  InventoryStock[]
+  movements StockMovement[]
+  purchaseOrders PurchaseOrder[]
+
+  @@index([tenantId])
+  @@map("warehouses")
+}
+
+model InventoryStock {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  productId    String   @map("product_id")
+  warehouseId  String   @map("warehouse_id")
+  quantity     Decimal  @default(0) @db.Decimal(14, 2)
+  minThreshold Decimal  @default(0) @map("min_threshold") @db.Decimal(14, 2)
+  lastUpdated  DateTime @updatedAt @map("last_updated")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, warehouseId])
+  @@index([tenantId])
+  @@map("inventory_stock")
+}
+
+// Sumber data AI forecasting
+model StockMovement {
+  id          String       @id @default(uuid())
+  tenantId    String       @map("tenant_id")
+  productId   String       @map("product_id")
+  warehouseId String       @map("warehouse_id")
+  type        MovementType
+  quantity    Decimal      @db.Decimal(14, 2) // signed: keluar negatif
+  note        String       @default("")
+  refId       String?      @map("ref_id")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, productId, createdAt])
+  @@map("stock_movements")
+}
+
+model Supplier {
+  id       String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  name     String
+  contact  String @default("")
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchaseOrders PurchaseOrder[]
+
+  @@index([tenantId])
+  @@map("suppliers")
+}
+
+model PurchaseOrder {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  code        String
+  supplierId  String   @map("supplier_id")
+  warehouseId String   @map("warehouse_id")
+  status      POStatus @default(draft)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier  Supplier            @relation(fields: [supplierId], references: [id])
+  warehouse Warehouse           @relation(fields: [warehouseId], references: [id])
+  items     PurchaseOrderItem[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id        String  @id @default(uuid())
+  poId      String  @map("po_id")
+  productId String  @map("product_id")
+  qty       Decimal @db.Decimal(14, 2)
+  price     Decimal @db.Decimal(14, 2)
+
+  po      PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  product Product       @relation(fields: [productId], references: [id])
+
+  @@map("purchase_order_items")
+}
+
+model Customer {
+  id            String @id @default(uuid())
+  tenantId      String @map("tenant_id")
+  name          String
+  contact       String @default("")
+  loyaltyPoints Int    @default(0) @map("loyalty_points")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  transactions SalesTransaction[]
+
+  @@index([tenantId])
+  @@map("customers")
+}
+
+model SalesTransaction {
+  id                String         @id @default(uuid())
+  tenantId          String         @map("tenant_id")
+  outletId          String?        @map("outlet_id")
+  cashierId         String?        @map("cashier_id")
+  customerId        String?        @map("customer_id")
+  clientGeneratedId String         @map("client_generated_id")
+  syncStatus        SyncStatus     @default(synced) @map("sync_status")
+  clientTimestamp   DateTime       @map("client_timestamp")
+  serverTimestamp   DateTime?      @map("server_timestamp")
+  total             Decimal        @db.Decimal(14, 2)
+  paymentMethod     PaymentMethod  @map("payment_method")
+  createdAt         DateTime       @default(now()) @map("created_at")
+
+  tenant   Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outlet   Outlet?                @relation(fields: [outletId], references: [id], onDelete: SetNull)
+  cashier  User?                  @relation(fields: [cashierId], references: [id], onDelete: SetNull)
+  customer Customer?              @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items    SalesTransactionItem[]
+
+  @@unique([tenantId, clientGeneratedId])
+  @@index([tenantId, clientTimestamp])
+  @@index([tenantId, syncStatus])
+  @@map("sales_transactions")
+}
+
+model SalesTransactionItem {
+  id            String  @id @default(uuid())
+  transactionId String  @map("transaction_id")
+  productId     String  @map("product_id")
+  qty           Decimal @db.Decimal(14, 2)
+  price         Decimal @db.Decimal(14, 2)
+
+  transaction SalesTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  product     Product          @relation(fields: [productId], references: [id])
+
+  @@map("sales_transaction_items")
+}
+
+model ChartOfAccount {
+  id       String      @id @default(uuid())
+  tenantId String      @map("tenant_id")
+  code     String
+  name     String
+  type     AccountType
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@map("chart_of_accounts")
+}
+
+// Jurnal otomatis dari semua transaksi
+model FinancialEntry {
+  id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
+  sourceModule     String   @map("source_module") // pos | inventory | finance
+  sourceRefId      String   @map("source_ref_id")
+  debitAccountId   String   @map("debit_account_id")
+  creditAccountId  String   @map("credit_account_id")
+  amount           Decimal  @db.Decimal(14, 2)
+  entryDate        DateTime @map("entry_date")
+  isAnomalyFlagged Boolean  @default(false) @map("is_anomaly_flagged")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, entryDate])
+  @@index([tenantId, isAnomalyFlagged])
+  @@map("financial_entries")
+}
+
+// Semua output AI + feedback (explainability via based_on_refs)
+model AiInsightLog {
+  id           String      @id @default(uuid())
+  tenantId     String      @map("tenant_id")
+  userId       String?     @map("user_id")
+  module       String      @default("assistant")
+  insightType  InsightType @map("insight_type")
+  title        String      @default("")
+  content      String
+  basedOnRefs  Json        @default("[]") @map("based_on_refs")
+  userFeedback Int?        @map("user_feedback") // 1 | -1 | null
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("ai_insights_log")
+}
+
+// Rate limit & billing kuota AI per tenant per bulan
+model AiUsageCounter {
+  id       String @id @default(uuid())
+  tenantId String @map("tenant_id")
+  month    String // "2026-09"
+  count    Int    @default(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, month])
+  @@map("ai_usage_counters")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  userId    String?  @map("user_id")
+  action    String // create | update | delete | login | ...
+  entity    String // products | sales_transactions | ...
+  entityId  String?  @map("entity_id")
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  tenantId  String           @map("tenant_id")
+  userId    String?          @map("user_id") // null = semua user tenant
+  type      NotificationType
+  title     String
+  body      String           @default("")
+  link      String           @default("")
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, read, createdAt])
+  @@map("notifications")
+}
