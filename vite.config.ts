@@ -40,8 +40,9 @@ function localSyncPlugin() {
           req.on('end', () => {
             try {
               const data = JSON.parse(body);
-              sharedState = { ...sharedState, ...data };
-              const payloadStr = JSON.stringify(data);
+              const statePayload = data.payload || data;
+              sharedState = { ...sharedState, ...statePayload };
+              const payloadStr = JSON.stringify({ action: data.action || "DATA_SYNC", payload: statePayload });
               for (const client of clients) {
                 try {
                   client.write(`data: ${payloadStr}\n\n`);
@@ -78,6 +79,9 @@ function localSyncPlugin() {
 }
 
 export default defineConfig({
+  optimizeDeps: {
+    entries: ["index.html"],
+  },
   server: {
     host: true,
     port: 5173,

@@ -35,7 +35,7 @@ export class NotificationsController {
 
   @Post(':id/read')
   @RequirePermissions('notifications:read')
-  markRead(@Tenant() tenantId: string, @Param('id') id: string) {
-    return this.notifications.markRead(tenantId, id);
+  markRead(@Tenant() tenantId: string, @CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.notifications.markRead(tenantId, id, user);
   }
 }

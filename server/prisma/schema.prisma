@@ -41,6 +41,7 @@ enum PaymentMethod {
   qris
   debit
   transfer
+  credit
 }
 
 enum POStatus {
@@ -50,11 +51,29 @@ enum POStatus {
   cancelled
 }
 
+// Siklus hutang-piutang. Dokumen dibuat saat barang diterima / penjualan
+// dikonfirmasi, lalu dilunasi lewat pembayaran yang menautkan ke dokumen.
+enum DocumentStatus {
+  open
+  partial
+  paid
+  voided
+}
+
 enum MovementType {
   sale
   purchase
   adjustment
   production
+  transfer_out
+  transfer_in
+}
+
+enum ProductType {
+  goods
+  raw_material
+  semi_finished
+  service
 }
 
 enum InsightType {
@@ -83,6 +102,59 @@ enum AccountType {
   expense
 }
 
+enum ExchangeRateSource {
+  manual
+  imported
+}
+
+enum JournalStatus {
+  draft
+  posted
+  voided
+}
+
+enum JournalDirection {
+  debit
+  credit
+}
+
+enum FiscalPeriodStatus {
+  open
+  closed
+}
+
+enum PermissionEffect {
+  allow
+  deny
+}
+
+enum TaxCategory {
+  vat
+  withholding
+  other
+}
+
+/// Arah pajak. `output` = pungutan yang tercatat ke akun liak dan muncul
+/// sebagai kewajiban (PPN keluaran, PPh21 atas gaji, PPh23 atas vendor).
+/// `input` = kredit pajak atau withhold yang mengurangi beban (PPN masukan,
+/// PPh23 atas proceeds). Dipakai untuk memilih akun liak dan arah jurnal.
+enum TaxDirection {
+  output
+  input
+}
+
+enum TaxRuleSource {
+  official
+  estimate
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
 // ─── Global (lintas tenant) ─────────────────────────────
 
 model Tenant {
@@ -93,37 +165,331 @@ model Tenant {
   settings         Json             @default("{}")
   createdAt        DateTime         @default(now()) @map("created_at")
 
-  subscriptions     Subscription[]
-  users             User[]
-  outlets           Outlet[]
-  modulesConfig     ModuleConfig[]
-  categories        ProductCategory[]
-  products          Product[]
-  warehouses        Warehouse[]
-  stocks            InventoryStock[]
-  movements         StockMovement[]
-  suppliers         Supplier[]
-  purchaseOrders    PurchaseOrder[]
-  customers         Customer[]
-  transactions      SalesTransaction[]
-  accounts          ChartOfAccount[]
-  entries           FinancialEntry[]
-  insights          AiInsightLog[]
-  usageCounters     AiUsageCounter[]
-  auditLogs         AuditLog[]
-  notifications     Notification[]
+  projects               Project[]
+  projectMilestones      ProjectMilestone[]
+  milestoneDependencies  MilestoneDependency[]
+  timesheets             Timesheet[]
+  shipments              Shipment[]
+  vehicles               Vehicle[]
+  fuelLogs               FuelLog[]
+  maintenancePlans       MaintenancePlan[]
+  workOrders             WorkOrder[]
+  subscriptions          Subscription[]
+  users                  User[]
+  outlets                Outlet[]
+  modulesConfig          ModuleConfig[]
+  categories             ProductCategory[]
+  products               Product[]
+  warehouses             Warehouse[]
+  stocks                 InventoryStock[]
+  movements              StockMovement[]
+  suppliers              Supplier[]
+  purchaseOrders         PurchaseOrder[]
+  customers              Customer[]
+  transactions           SalesTransaction[]
+  accounts               ChartOfAccount[]
+  entries                FinancialEntry[]
+  journals               JournalHeader[]
+  insights               AiInsightLog[]
+  usageCounters          AiUsageCounter[]
+  auditLogs              AuditLog[]
+  notifications          Notification[]
+  companies              Company[]
+  roles                  AccessRole[]
+  StockOp                StockOp[]
+  vendorBills            VendorBill[]
+  vendorPayments         VendorPayment[]
+  customerInvoices       CustomerInvoice[]
+  customerReceipts       CustomerReceipt[]
+  fixedAssets            FixedAsset[]
+  depreciationEntries    DepreciationSchedule[]
+  leads                  Lead[]
+  opportunities          Opportunity[]
+  quotations             Quotation[]
+  salesOrders            SalesOrder[]
+  interactions           CustomerInteraction[]
+  complaints             CustomerComplaint[]
+  requisitions           PurchaseRequisition[]
+  stockTransfers         StockTransfer[]
+  vendorPerformance      VendorPerformance[]
+  bankAccounts           BankAccount[]
+  bankStatements         BankStatement[]
+  documentSequences      DocumentSequence[]
+  billsOfMaterials       BillOfMaterials[]
+  productionOrders       ProductionOrder[]
+  productionConsumptions ProductionConsumption[]
+  qualityChecks          QualityCheck[]
+  workCenters            WorkCenter[]
+  productionSchedules    ProductionSchedule[]
+  jobPostings            JobPosting[]
+  applicants             Applicant[]
+  kpiTargets             KpiTarget[]
+  performanceReviews     PerformanceReview[]
+  resourceAllocations    ResourceAllocation[]
+  sensorDevices          SensorDevice[]
+  sensorReadings         SensorReading[]
+  ocrResults             OcrResult[]
+  departments            Department[]
+  positions              Position[]
+  employees              Employee[]
+  attendances            Attendance[]
+  leaves                 LeaveRequest[]
+  payrollRuns            PayrollRun[]
+  payrollItems           PayrollItem[]
+  ShipmentEvent          ShipmentEvent[]
+  KpiDefinition          KpiDefinition[]
 
   @@map("tenants")
 }
 
+// Company & currency
+
+model Currency {
+  code          String @id // ISO 4217, e.g. IDR, USD, SGD
+  name          String
+  symbol        String
+  decimalPlaces Int    @default(2) @map("decimal_places")
+
+  companiesAsDefault Company[]      @relation("CompanyDefaultCurrency")
+  baseExchangeRates  ExchangeRate[] @relation("ExchangeRateBaseCurrency")
+  quoteExchangeRates ExchangeRate[] @relation("ExchangeRateQuoteCurrency")
+
+  @@map("currencies")
+}
+
+model Company {
+  id                  String   @id @default(uuid())
+  tenantId            String   @map("tenant_id")
+  parentId            String?  @map("parent_id")
+  code                String
+  name                String
+  legalName           String?  @map("legal_name")
+  taxId               String?  @map("tax_id")
+  countryCode         String   @default("ID") @map("country_code")
+  defaultCurrencyCode String   @default("IDR") @map("default_currency_code")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  tenant                 Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent                 Company?                @relation("CompanyTree", fields: [tenantId, parentId], references: [tenantId, id], onDelete: Restrict)
+  children               Company[]               @relation("CompanyTree")
+  defaultCurrency        Currency                @relation("CompanyDefaultCurrency", fields: [defaultCurrencyCode], references: [code], onDelete: Restrict)
+  exchangeRates          ExchangeRate[]
+  chartOfAccounts        ChartOfAccount[]
+  journalHeaders         JournalHeader[]
+  fiscalYears            FiscalYear[]
+  fiscalPeriods          FiscalPeriod[]
+  journalSequences       JournalSequence[]
+  documentSequences      DocumentSequence[]
+  fixedAssets            FixedAsset[]
+  depreciationSchedules  DepreciationSchedule[]
+  requisitions           PurchaseRequisition[]
+  stockTransfers         StockTransfer[]
+  vendorPerformance      VendorPerformance[]
+  bankAccounts           BankAccount[]
+  bankStatements         BankStatement[]
+  vendorBills            VendorBill[]
+  vendorPayments         VendorPayment[]
+  customerInvoices       CustomerInvoice[]
+  customerReceipts       CustomerReceipt[]
+  warehouses             Warehouse[]
+  suppliers              Supplier[]
+  customers              Customer[]
+  stocks                 InventoryStock[]
+  movements              StockMovement[]
+  purchaseOrders         PurchaseOrder[]
+  transactions           SalesTransaction[]
+  financialEntries       FinancialEntry[]
+  taxRules               TaxRule[]
+  taxComputations        TaxComputation[]
+  approvalRequests       ApprovalRequest[]
+  departments            Department[]
+  positions              Position[]
+  employees              Employee[]
+  attendances            Attendance[]
+  leaves                 LeaveRequest[]
+  payrollRuns            PayrollRun[]
+  payrollItems           PayrollItem[]
+  billsOfMaterials       BillOfMaterials[]
+  productionOrders       ProductionOrder[]
+  productionConsumptions ProductionConsumption[]
+  qualityChecks          QualityCheck[]
+  workCenters            WorkCenter[]
+  jobPostings            JobPosting[]
+  applicants             Applicant[]
+  kpiTargets             KpiTarget[]
+  performanceReviews     PerformanceReview[]
+  resourceAllocations    ResourceAllocation[]
+  sensorDevices          SensorDevice[]
+  sensorReadings         SensorReading[]
+  ocrResults             OcrResult[]
+  productionSchedules    ProductionSchedule[]
+  projects               Project[]
+  projectMilestones      ProjectMilestone[]
+  milestoneDependencies  MilestoneDependency[]
+  timesheets             Timesheet[]
+  shipments              Shipment[]
+  vehicles               Vehicle[]
+  fuelLogs               FuelLog[]
+  maintenancePlans       MaintenancePlan[]
+  workOrders             WorkOrder[]
+  StockOp                StockOp[]
+  leads                  Lead[]
+  opportunities          Opportunity[]
+  quotations             Quotation[]
+  salesOrders            SalesOrder[]
+  interactions           CustomerInteraction[]
+  complaints             CustomerComplaint[]
+  ShipmentEvent          ShipmentEvent[]
+  KpiDefinition          KpiDefinition[]
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, id])
+  @@index([tenantId, parentId])
+  @@map("companies")
+}
+
+model ExchangeRate {
+  id                String             @id @default(uuid())
+  tenantId          String             @map("tenant_id")
+  companyId         String             @map("company_id")
+  baseCurrencyCode  String             @map("base_currency_code")
+  quoteCurrencyCode String             @map("quote_currency_code")
+  rate              Decimal            @db.Decimal(18, 8)
+  effectiveDate     DateTime           @map("effective_date") @db.Date
+  source            ExchangeRateSource @default(manual)
+  createdAt         DateTime           @default(now()) @map("created_at")
+
+  company       Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  baseCurrency  Currency @relation("ExchangeRateBaseCurrency", fields: [baseCurrencyCode], references: [code], onDelete: Restrict)
+  quoteCurrency Currency @relation("ExchangeRateQuoteCurrency", fields: [quoteCurrencyCode], references: [code], onDelete: Restrict)
+
+  @@unique([tenantId, companyId, baseCurrencyCode, quoteCurrencyCode, effectiveDate])
+  @@index([tenantId, companyId, effectiveDate])
+  @@map("exchange_rates")
+}
+
+model TaxRule {
+  id            String        @id @default(uuid())
+  tenantId      String        @map("tenant_id")
+  companyId     String        @map("company_id")
+  code          String
+  name          String
+  category      TaxCategory
+  direction     TaxDirection  @default(output)
+  basisType     String        @map("basis_type")
+  rate          Decimal?      @db.Decimal(9, 6)
+  effectiveFrom DateTime      @map("effective_from") @db.Date
+  effectiveTo   DateTime?     @map("effective_to") @db.Date
+  sourceRef     String?       @map("source_ref")
+  source        TaxRuleSource @default(estimate)
+  isActive      Boolean       @default(true) @map("is_active")
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  company      Company          @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  brackets     TaxBracket[]
+  computations TaxComputation[]
+
+  @@unique([companyId, code, effectiveFrom])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, code, effectiveFrom])
+  @@map("tax_rules")
+}
+
+model TaxBracket {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  companyId     String    @map("company_id")
+  taxRuleId     String    @map("tax_rule_id")
+  sortOrder     Int       @map("sort_order")
+  lowerBound    Decimal   @map("lower_bound") @db.Decimal(14, 2)
+  upperBound    Decimal?  @map("upper_bound") @db.Decimal(14, 2)
+  ratePercent   Decimal   @map("rate_percent") @db.Decimal(9, 6)
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  taxRule TaxRule @relation(fields: [tenantId, companyId, taxRuleId], references: [tenantId, companyId, id], onDelete: Cascade)
+
+  @@unique([taxRuleId, sortOrder, effectiveFrom])
+  @@index([tenantId, companyId, taxRuleId, lowerBound])
+  @@map("tax_brackets")
+}
+
+model TaxComputation {
+  id           String        @id @default(uuid())
+  tenantId     String        @map("tenant_id")
+  companyId    String        @map("company_id")
+  taxRuleId    String        @map("tax_rule_id")
+  documentType String        @map("document_type")
+  documentId   String        @map("document_id")
+  direction    TaxDirection  @default(output)
+  baseAmount   Decimal       @map("base_amount") @db.Decimal(14, 2)
+  taxAmount    Decimal       @map("tax_amount") @db.Decimal(14, 2)
+  source       TaxRuleSource
+  ruleSnapshot Json          @map("rule_snapshot")
+  computedAt   DateTime      @default(now()) @map("computed_at")
+
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  taxRule TaxRule @relation(fields: [tenantId, companyId, taxRuleId], references: [tenantId, companyId, id], onDelete: Restrict)
+
+  @@index([tenantId, companyId, documentType, documentId])
+  @@index([tenantId, companyId, computedAt])
+  @@map("tax_computations")
+}
+
+model ApprovalRequest {
+  id            String         @id @default(uuid())
+  tenantId      String         @map("tenant_id")
+  companyId     String         @map("company_id")
+  documentType  String         @map("document_type")
+  documentId    String         @map("document_id")
+  status        ApprovalStatus @default(pending)
+  currentStep   Int            @default(1) @map("current_step")
+  submittedById String         @map("submitted_by_id")
+  submittedAt   DateTime       @default(now()) @map("submitted_at")
+  resolvedById  String?        @map("resolved_by_id")
+  resolvedAt    DateTime?      @map("resolved_at")
+  note          String         @default("")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  company Company        @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  steps   ApprovalStep[]
+
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status, submittedAt])
+  @@index([tenantId, companyId, documentType, documentId])
+  @@map("approval_requests")
+}
+
+model ApprovalStep {
+  id                 String         @id @default(uuid())
+  tenantId           String         @map("tenant_id")
+  companyId          String         @map("company_id")
+  requestId          String         @map("request_id")
+  stepOrder          Int            @map("step_order")
+  approverRoleId     String?        @map("approver_role_id")
+  requiredPermission String?        @map("required_permission")
+  status             ApprovalStatus @default(pending)
+  actedById          String?        @map("acted_by_id")
+  actedAt            DateTime?      @map("acted_at")
+  note               String         @default("")
+
+  request ApprovalRequest @relation(fields: [tenantId, companyId, requestId], references: [tenantId, companyId, id], onDelete: Cascade)
+
+  @@unique([requestId, stepOrder])
+  @@index([tenantId, companyId, status])
+  @@map("approval_steps")
+}
+
 model Subscription {
-  id       String           @id @default(uuid())
-  tenantId String           @map("tenant_id")
-  plan     SubscriptionPlan
-  status   String           @default("active") // active | trialing | past_due | cancelled
-  aiQuota  Int              @default(0) @map("ai_quota") // kuota query AI/bulan (0 = tanpa AI)
-  startedAt DateTime        @default(now()) @map("started_at")
-  endsAt   DateTime?        @map("ends_at")
+  id        String           @id @default(uuid())
+  tenantId  String           @map("tenant_id")
+  plan      SubscriptionPlan
+  status    String           @default("active") // active | trialing | past_due | cancelled
+  aiQuota   Int              @default(0) @map("ai_quota") // kuota query AI/bulan (0 = tanpa AI)
+  startedAt DateTime         @default(now()) @map("started_at")
+  endsAt    DateTime?        @map("ends_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -160,38 +526,97 @@ model ModuleConfig {
 }
 
 model User {
-  id               String  @id @default(uuid())
-  tenantId         String  @map("tenant_id")
+  id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
   name             String
   email            String
-  passwordHash     String  @map("password_hash")
+  passwordHash     String   @map("password_hash")
   role             Role
-  permissions      Json    @default("{}") // override granular: {"finance:read": true/false}
-  twoFactorSecret  String? @map("two_factor_secret")
-  twoFactorEnabled Boolean @default(false) @map("two_factor_enabled")
-  isActive         Boolean @default(true) @map("is_active")
+  roleId           String   @map("role_id")
+  permissions      Json     @default("{}") // override granular: {"finance:read": true/false}
+  twoFactorSecret  String?  @map("two_factor_secret")
+  twoFactorEnabled Boolean  @default(false) @map("two_factor_enabled")
+  // Access token yang diterbitkan sebelum waktu ini ditolak (logout-all, reset sesi).
+  tokensValidAfter DateTime? @map("tokens_valid_after")
+  isActive         Boolean  @default(true) @map("is_active")
   createdAt        DateTime @default(now()) @map("created_at")
 
-  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  outlets      UserOutlet[]
-  transactions SalesTransaction[]
+  tenant                 Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outlets                UserOutlet[]
+  transactions           SalesTransaction[]
+  insights               AiInsightLog[]
+  auditLogs              AuditLog[]
+  notifications          Notification[]
+  databaseRole           AccessRole            @relation(fields: [tenantId, roleId], references: [tenantId, id], onDelete: Restrict)
+  requestedRequisitions  PurchaseRequisition[] @relation("RequisitionRequester")
+  handledInteractions    CustomerInteraction[]
+  employeeProfile        Employee?
+  inspectedQualityChecks QualityCheck[]
+  approvedRequisitions   PurchaseRequisition[] @relation("RequisitionApprover")
+  OcrResult              OcrResult[]
+  refreshSessions         RefreshSession[]
 
   @@unique([tenantId, email])
+  @@unique([tenantId, id])
   @@index([tenantId])
   @@map("users")
 }
 
+model Permission {
+  key         String @id
+  module      String
+  action      String
+  description String
+
+  roleAssignments RolePermission[]
+
+  @@map("permissions")
+}
+
+model AccessRole {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  key       String
+  name      String
+  rank      Int
+  isSystem  Boolean  @default(true) @map("is_system")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users       User[]
+  permissions RolePermission[]
+
+  @@unique([tenantId, key])
+  @@unique([tenantId, id])
+  @@index([tenantId, rank])
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId        String           @map("role_id")
+  permissionKey String           @map("permission_key")
+  effect        PermissionEffect @default(allow)
+
+  role       AccessRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionKey], references: [key], onDelete: Cascade)
+
+  @@id([roleId, permissionKey])
+  @@index([permissionKey])
+  @@map("role_permissions")
+}
+
 model Outlet {
-  id       String  @id @default(uuid())
-  tenantId String  @map("tenant_id")
-  name     String
-  address  String  @default("")
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  address   String   @default("")
   createdAt DateTime @default(now()) @map("created_at")
 
   tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   warehouses   Warehouse[]
   users        UserOutlet[]
   transactions SalesTransaction[]
+  shipments    Shipment[]
 
   @@index([tenantId])
   @@map("outlets")
@@ -214,71 +639,1888 @@ model ProductCategory {
   name     String
   parentId String? @map("parent_id")
 
-  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   ProductCategory?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children ProductCategory[] @relation("CategoryTree")
   products Product[]
 
   @@index([tenantId])
   @@map("product_categories")
 }
 
+// Product = katalog master bersama per tenant (shared catalog), bukan company-scoped.
+// COA, warehouse, supplier, dan customer company-scoped; produk dipakai lintas
+// company dalam satu tenant sehingga tidak diberi companyId.
 model Product {
-  id           String   @id @default(uuid())
-  tenantId     String   @map("tenant_id")
+  id           String      @id @default(uuid())
+  tenantId     String      @map("tenant_id")
   sku          String
   name         String
-  categoryId   String?  @map("category_id")
-  unit         String   @default("pcs")
-  sellPrice    Decimal  @map("sell_price") @db.Decimal(14, 2)
-  costPrice    Decimal  @default(0) @map("cost_price") @db.Decimal(14, 2)
+  categoryId   String?     @map("category_id")
+  productType  ProductType @default(goods) @map("product_type")
+  unit         String      @default("pcs")
+  sellPrice    Decimal     @map("sell_price") @db.Decimal(14, 2)
+  costPrice    Decimal     @default(0) @map("cost_price") @db.Decimal(14, 2)
   barcode      String?
-  customFields Json     @default("{}") @map("custom_fields")
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
+  customFields Json        @default("{}") @map("custom_fields")
+  isActive     Boolean     @default(true) @map("is_active")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
 
-  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  stocks   InventoryStock[]
-  movements StockMovement[]
-  poItems  PurchaseOrderItem[]
-  txItems  SalesTransactionItem[]
+  tenant                 Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category               ProductCategory?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  stocks                 InventoryStock[]
+  movements              StockMovement[]
+  poItems                PurchaseOrderItem[]
+  txItems                SalesTransactionItem[]
+  StockOpLine            StockOpLine[]
+  quotationLines         QuotationLine[]
+  salesOrderLines        SalesOrderLine[]
+  bomOutputLines         BillOfMaterials[]
+  bomComponentLines      BomLine[]
+  shipmentLines          ShipmentItem[]
+  productionOrders       ProductionOrder[]
+  productionConsumptions ProductionConsumption[]
+  qcStages               QcStageConfig[]
+  reorderPoint           Decimal                   @default(0) @map("reorder_point") @db.Decimal(14, 2)
+  reorderQty             Decimal                   @default(0) @map("reorder_qty") @db.Decimal(14, 2)
+  /// Supplier default untuk reorder otomatis. Tanpa ini, saran tidak bisa
+  /// menjadi PO karena tidak ada yang/vendor tujuan.
+  preferredSupplierId    String?                   @map("preferred_supplier_id")
+  requisitionLines       PurchaseRequisitionLine[]
+  transferLines          StockTransferLine[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])
   @@index([tenantId, barcode])
+  @@index([tenantId, isActive])
   @@map("products")
 }
 
+// Faktur pembelian: arise saat PO diterima. Menggantikan jurnal "Cr Hutang"
+// yang dulu dibuat langsung tanpa dokumen, supaya pembayaran bisa ditelusuri.
+model VendorBill {
+  id              String         @id @default(uuid())
+  tenantId        String         @map("tenant_id")
+  companyId       String         @map("company_id")
+  number          String
+  supplierId      String         @map("supplier_id")
+  purchaseOrderId String?        @map("purchase_order_id")
+  journalId       String?        @map("journal_id")
+  billDate        DateTime       @default(now()) @map("bill_date")
+  dueDate         DateTime       @map("due_date")
+  total           Decimal        @db.Decimal(18, 2)
+  taxAmount       Decimal        @default(0) @map("tax_amount") @db.Decimal(18, 2)
+  taxTotal        Decimal        @default(0) @map("tax_total") @db.Decimal(18, 2)
+  paidAmount      Decimal        @default(0) @map("paid_amount") @db.Decimal(18, 2)
+  status          DocumentStatus @default(open)
+  note            String         @default("")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company         @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  supplier      Supplier        @relation(fields: [tenantId, companyId, supplierId], references: [tenantId, companyId, id], onDelete: Restrict)
+  purchaseOrder PurchaseOrder?  @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  journal       JournalHeader?  @relation(fields: [tenantId, companyId, journalId], references: [tenantId, companyId, id], onDelete: Restrict)
+  payments      VendorPayment[]
+
+  @@unique([tenantId, companyId, number])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status, dueDate])
+  @@index([tenantId, supplierId])
+  @@map("vendor_bills")
+}
+
+model VendorPayment {
+  id         String        @id @default(uuid())
+  tenantId   String        @map("tenant_id")
+  companyId  String        @map("company_id")
+  number     String
+  supplierId String        @map("supplier_id")
+  billId     String?       @map("bill_id")
+  journalId  String?       @map("journal_id")
+  payDate    DateTime      @default(now()) @map("pay_date")
+  amount     Decimal       @db.Decimal(18, 2)
+  method     PaymentMethod @default(cash)
+  note       String        @default("")
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company        @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  supplier Supplier       @relation(fields: [tenantId, companyId, supplierId], references: [tenantId, companyId, id], onDelete: Restrict)
+  bill     VendorBill?    @relation(fields: [billId], references: [id], onDelete: Restrict)
+  journal  JournalHeader? @relation(fields: [tenantId, companyId, journalId], references: [tenantId, companyId, id], onDelete: Restrict)
+
+  @@unique([tenantId, companyId, number])
+  @@index([tenantId, companyId, payDate])
+  @@index([tenantId, billId])
+  @@map("vendor_payments")
+}
+
+// Faktur penjualan: arise saat transaksi POS dikonfirmasi. Untuk penjualan
+// kredit (non-tunai) inilah piutang pelanggan terbentuk.
+model CustomerInvoice {
+  id                 String         @id @default(uuid())
+  tenantId           String         @map("tenant_id")
+  companyId          String         @map("company_id")
+  number             String
+  customerId         String?        @map("customer_id")
+  salesTransactionId String?        @map("sales_transaction_id")
+  projectId          String?        @map("project_id")
+  journalId          String?        @map("journal_id")
+  invoiceDate        DateTime       @default(now()) @map("invoice_date")
+  dueDate            DateTime       @map("due_date")
+  total              Decimal        @db.Decimal(18, 2)
+  taxAmount          Decimal        @default(0) @map("tax_amount") @db.Decimal(18, 2)
+  taxTotal           Decimal        @default(0) @map("tax_total") @db.Decimal(18, 2)
+  paidAmount         Decimal        @default(0) @map("paid_amount") @db.Decimal(18, 2)
+  status             DocumentStatus @default(open)
+  note               String         @default("")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company     Company           @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  customer    Customer?         @relation(fields: [tenantId, companyId, customerId], references: [tenantId, companyId, id], onDelete: Restrict)
+  transaction SalesTransaction? @relation(fields: [salesTransactionId], references: [id], onDelete: Restrict)
+  salesOrder  SalesOrder?
+  project     Project?          @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  journal     JournalHeader?    @relation(fields: [tenantId, companyId, journalId], references: [tenantId, companyId, id], onDelete: Restrict)
+  receipts    CustomerReceipt[]
+  timesheets  Timesheet[]
+
+  @@unique([tenantId, companyId, number])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status, dueDate])
+  @@index([tenantId, customerId])
+  @@map("customer_invoices")
+}
+
+model CustomerReceipt {
+  id         String        @id @default(uuid())
+  tenantId   String        @map("tenant_id")
+  companyId  String        @map("company_id")
+  number     String
+  customerId String?       @map("customer_id")
+  invoiceId  String?       @unique @map("invoice_id")
+  journalId  String?       @map("journal_id")
+  payDate    DateTime      @default(now()) @map("pay_date")
+  amount     Decimal       @db.Decimal(18, 2)
+  method     PaymentMethod @default(cash)
+  note       String        @default("")
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company          @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  customer Customer?        @relation(fields: [tenantId, companyId, customerId], references: [tenantId, companyId, id], onDelete: Restrict)
+  invoice  CustomerInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  journal  JournalHeader?   @relation(fields: [tenantId, companyId, journalId], references: [tenantId, companyId, id], onDelete: Restrict)
+
+  @@unique([tenantId, companyId, number])
+  @@index([tenantId, companyId, payDate])
+  @@index([tenantId, invoiceId])
+  @@map("customer_receipts")
+}
+
+// Penghitung nomor dokumen. Berbeda dari sequence jurnal karena dokumen hutang
+// dan piutang tidak melewati jurnal.
+// Urutan aman terhadap request paralel lewat retry pada unique constraint.
+model DocumentSequence {
+  tenantId  String @map("tenant_id")
+  companyId String @map("company_id")
+  kind      String
+  nextValue Int    @default(1) @map("next_value")
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@id([tenantId, companyId, kind])
+  @@map("document_sequences")
+}
+
+// Aset tetap: dicatat pada akun aset, lalu disusutkan bulanan. Nilai buku
+// yang muncul di neraca adalah acquisitionCost - accumulatedDepreciation,
+// jadi Akumulasi Penyusutan harus bertipe asset (sisi kredit).
+model FixedAsset {
+  id                      String             @id @default(uuid())
+  tenantId                String             @map("tenant_id")
+  companyId               String             @map("company_id")
+  code                    String
+  name                    String
+  category                String             @default("")
+  location                String             @default("")
+  acquisitionDate         DateTime           @map("acquisition_date") @db.Date
+  acquisitionCost         Decimal            @map("acquisition_cost") @db.Decimal(18, 2)
+  salvageValue            Decimal            @default(0) @map("salvage_value") @db.Decimal(18, 2)
+  usefulLifeMonths        Int                @map("useful_life_months")
+  depreciationMethod      DepreciationMethod @default(straight_line) @map("depreciation_method")
+  decliningRate           Decimal?           @map("declining_rate") @db.Decimal(9, 6)
+  accumulatedDepreciation Decimal            @default(0) @map("accumulated_depreciation") @db.Decimal(18, 2)
+  status                  AssetStatus        @default(active)
+  disposedAt              DateTime?          @map("disposed_at")
+  disposalProceeds        Decimal?           @map("disposal_proceeds") @db.Decimal(18, 2)
+  journalId               String?            @map("journal_id")
+  createdAt               DateTime           @default(now()) @map("created_at")
+  updatedAt               DateTime           @updatedAt @map("updated_at")
+
+  tenant    Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company                @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  journal   JournalHeader?         @relation(fields: [tenantId, companyId, journalId], references: [tenantId, companyId, id], onDelete: Restrict)
+  schedules DepreciationSchedule[]
+
+  @@unique([tenantId, companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status])
+  @@map("fixed_assets")
+}
+
+// Satu baris per aset per periode. Idempoten lewat unique (assetId, periodId)
+// sehingga penyusutan double-run tidak akan terjadi meski request paralel.
+model DepreciationSchedule {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  companyId    String   @map("company_id")
+  assetId      String   @map("asset_id")
+  periodId     String   @map("period_id")
+  depreciation Decimal  @db.Decimal(18, 2)
+  accumulated  Decimal  @db.Decimal(18, 2)
+  bookValue    Decimal  @map("book_value") @db.Decimal(18, 2)
+  journalId    String?  @map("journal_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company        @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  asset   FixedAsset     @relation(fields: [tenantId, companyId, assetId], references: [tenantId, companyId, id], onDelete: Cascade)
+  period  FiscalPeriod   @relation(fields: [tenantId, companyId, periodId], references: [tenantId, companyId, id], onDelete: Cascade)
+  journal JournalHeader? @relation(fields: [tenantId, companyId, journalId], references: [tenantId, companyId, id], onDelete: Restrict)
+
+  @@unique([assetId, periodId])
+  @@index([tenantId, companyId, periodId])
+  @@map("depreciation_schedules")
+}
+
+// Permintaan pembelian internal sebelum jadi PO. Memisahkan "butuh barang"
+// dari "sudahਦega pesan ke vendor" supaya purchase order tidak dibuat untuk
+// kebutuhan yang sebenarnya bisa dipenuhi dari stok gudang lain.
+model PurchaseRequisition {
+  id              String            @id @default(uuid())
+  tenantId        String            @map("tenant_id")
+  companyId       String            @map("company_id")
+  code            String
+  status          RequisitionStatus @default(draft)
+  reason          String            @default("")
+  requestedById   String?           @map("requested_by_id")
+  approvedById    String?           @map("approved_by_id")
+  approvedAt      DateTime?         @map("approved_at")
+  purchaseOrderId String?           @unique @map("purchase_order_id")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  tenant        Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company                   @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  requestedBy   User?                     @relation("RequisitionRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  approvedBy    User?                     @relation("RequisitionApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  purchaseOrder PurchaseOrder?            @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  lines         PurchaseRequisitionLine[]
+
+  @@unique([tenantId, companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status])
+  @@map("purchase_requisitions")
+}
+
+model PurchaseRequisitionLine {
+  id            String  @id @default(uuid())
+  requisitionId String  @map("requisition_id")
+  productId     String  @map("product_id")
+  requestedQty  Decimal @map("requested_qty") @db.Decimal(14, 2)
+  orderedQty    Decimal @default(0) @map("ordered_qty") @db.Decimal(14, 2)
+  note          String  @default("")
+
+  requisition PurchaseRequisition @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+  product     Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([requisitionId, productId])
+  @@index([requisitionId])
+  @@map("purchase_requisition_lines")
+}
+
+// Stock op multi-gudang. Barang keluar dari gudang asal saat dikirim dan
+// baru masuk gudang tujuan saat diterima, sehinggaqty "diantara gudang"
+// tidak hilang maupunlipatan.
+model StockTransfer {
+  id              String         @id @default(uuid())
+  tenantId        String         @map("tenant_id")
+  companyId       String         @map("company_id")
+  code            String
+  fromWarehouseId String         @map("from_warehouse_id")
+  toWarehouseId   String         @map("to_warehouse_id")
+  status          TransferStatus @default(draft)
+  note            String         @default("")
+  shippedAt       DateTime?      @map("shipped_at")
+  receivedAt      DateTime?      @map("received_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company             @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  fromWarehouse Warehouse           @relation("TransferFrom", fields: [tenantId, companyId, fromWarehouseId], references: [tenantId, companyId, id], onDelete: Restrict)
+  toWarehouse   Warehouse           @relation("TransferTo", fields: [tenantId, companyId, toWarehouseId], references: [tenantId, companyId, id], onDelete: Restrict)
+  lines         StockTransferLine[]
+
+  @@unique([tenantId, companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status])
+  @@map("stock_transfers")
+}
+
+model StockTransferLine {
+  id         String  @id @default(uuid())
+  transferId String  @map("transfer_id")
+  productId  String  @map("product_id")
+  qty        Decimal @db.Decimal(14, 2)
+
+  transfer StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product  Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([transferId, productId])
+  @@index([transferId])
+  @@map("stock_transfer_lines")
+}
+
+// Scorecard vendor dihitung dari PO yang sudah diterima. Nilainya dipakai
+// untuk mengurutkan supplier saat membuat PO, bukan untuk auto-block.
+model VendorPerformance {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  companyId    String   @map("company_id")
+  supplierId   String   @map("supplier_id")
+  periodStart  DateTime @map("period_start") @db.Date
+  periodEnd    DateTime @map("period_end") @db.Date
+  ordersCount  Int      @default(0) @map("orders_count")
+  ordersOnTime Int      @default(0) @map("orders_on_time")
+  totalValue   Decimal  @default(0) @db.Decimal(18, 2)
+  qualityScore Decimal? @map("quality_score") @db.Decimal(5, 2)
+  onTimeScore  Decimal? @map("on_time_score") @db.Decimal(5, 2)
+  priceScore   Decimal? @map("price_score") @db.Decimal(5, 2)
+  overallScore Decimal? @map("overall_score") @db.Decimal(5, 2)
+  computedAt   DateTime @default(now()) @map("computed_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  supplier Supplier @relation(fields: [tenantId, companyId, supplierId], references: [tenantId, companyId, id], onDelete: Cascade)
+
+  @@unique([tenantId, companyId, supplierId, periodStart])
+  @@index([tenantId, companyId, overallScore])
+  @@map("vendor_performance")
+}
+
+model BankAccount {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  companyId     String   @map("company_id")
+  code          String
+  name          String
+  bankName      String   @default("") @map("bank_name")
+  accountNumber String   @default("") @map("account_number")
+  accountId     String   @map("account_id")
+  currencyCode  String   @default("IDR") @map("currency_code")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company    Company         @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  account    ChartOfAccount  @relation(fields: [tenantId, companyId, accountId], references: [tenantId, companyId, id], onDelete: Restrict)
+  statements BankStatement[]
+
+  @@unique([tenantId, companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId])
+  @@map("bank_accounts")
+}
+
+model BankStatement {
+  id               String    @id @default(uuid())
+  tenantId         String    @map("tenant_id")
+  companyId        String    @map("company_id")
+  bankAccountId    String    @map("bank_account_id")
+  statementDate    DateTime  @map("statement_date") @db.Date
+  description      String
+  reference        String    @default("")
+  amount           Decimal   @db.Decimal(18, 2)
+  isReconciled     Boolean   @default(false) @map("is_reconciled")
+  matchedJournalId String?   @unique @map("matched_journal_id")
+  matchedAt        DateTime? @map("matched_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company        Company        @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  bankAccount    BankAccount    @relation(fields: [tenantId, companyId, bankAccountId], references: [tenantId, companyId, id], onDelete: Cascade)
+  matchedJournal JournalHeader? @relation("BankStatementJournal", fields: [matchedJournalId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, companyId, bankAccountId, isReconciled])
+  @@index([tenantId, companyId, statementDate])
+  @@map("bank_statements")
+}
+
+// Lead & opportunity: pipeline penjualan sebelum jadi pelanggan. Lead yang
+// sudah "converted" menunjuk Customer sehingga tidak dibuat dobel.
+model Lead {
+  id          String     @id @default(uuid())
+  tenantId    String     @map("tenant_id")
+  companyId   String     @map("company_id")
+  name        String
+  contactName String     @default("") @map("contact_name")
+  phone       String     @default("")
+  email       String     @default("")
+  source      String     @default("")
+  status      LeadStatus @default(new)
+  notes       String     @default("")
+  customerId  String?    @map("customer_id")
+  convertedAt DateTime?  @map("converted_at")
+  /// Tanggal prospek dinyatakan hilang — dipakai untuk hitung conversion rate.
+  lostAt      DateTime?  @map("lost_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company       @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  customer      Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  opportunities Opportunity[]
+
+  @@index([tenantId, companyId, status])
+  @@index([tenantId, companyId, createdAt])
+  @@map("leads")
+}
+
+model Opportunity {
+  id                String           @id @default(uuid())
+  tenantId          String           @map("tenant_id")
+  companyId         String           @map("company_id")
+  leadId            String?          @map("lead_id")
+  customerId        String?          @map("customer_id")
+  title             String
+  value             Decimal          @default(0) @db.Decimal(18, 2)
+  stage             OpportunityStage @default(prospecting)
+  probability       Int              @default(10) // persen 0-100
+  expectedCloseDate DateTime?        @map("expected_close_date") @db.Date
+  notes             String           @default("")
+  closedAt          DateTime?        @map("closed_at")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company    Company     @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  lead       Lead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  customer   Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  quotations Quotation[]
+
+  @@index([tenantId, companyId, stage])
+  @@index([tenantId, companyId, expectedCloseDate])
+  @@map("opportunities")
+}
+
+model Quotation {
+  id            String          @id @default(uuid())
+  tenantId      String          @map("tenant_id")
+  companyId     String          @map("company_id")
+  number        String
+  customerId    String?         @map("customer_id")
+  opportunityId String?         @map("opportunity_id")
+  status        QuotationStatus @default(draft)
+  validUntil    DateTime?       @map("valid_until") @db.Date
+  note          String          @default("")
+  total         Decimal         @default(0) @db.Decimal(18, 2)
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company     Company         @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  customer    Customer?       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  opportunity Opportunity?    @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  // Sisi pasif: FK-nya dipegang SalesOrder.quotationId supaya satu relasi
+  // tidak punya owner di kedua sisi sekaligus.
+  salesOrder  SalesOrder?
+  lines       QuotationLine[]
+
+  @@unique([tenantId, companyId, number])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status])
+  @@map("quotations")
+}
+
+model QuotationLine {
+  id          String  @id @default(uuid())
+  quotationId String  @map("quotation_id")
+  productId   String  @map("product_id")
+  qty         Decimal @db.Decimal(14, 2)
+  price       Decimal @db.Decimal(18, 2)
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([quotationId, productId])
+  @@index([quotationId])
+  @@map("quotation_lines")
+}
+
+// Sales order: pesanan pelanggan dari quotation,difulfill dari stok gudang.
+model SalesOrder {
+  id          String           @id @default(uuid())
+  tenantId    String           @map("tenant_id")
+  companyId   String           @map("company_id")
+  number      String
+  customerId  String           @map("customer_id")
+  warehouseId String           @map("warehouse_id")
+  status      SalesOrderStatus @default(draft)
+  total       Decimal          @default(0) @db.Decimal(18, 2)
+  fulfilledAt DateTime?        @map("fulfilled_at")
+  invoiceId   String?          @unique @map("invoice_id")
+  note        String           @default("")
+  quotationId String?          @unique @map("quotation_id")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company          @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  customer  Customer         @relation(fields: [tenantId, companyId, customerId], references: [tenantId, companyId, id], onDelete: Restrict)
+  warehouse Warehouse        @relation(fields: [tenantId, companyId, warehouseId], references: [tenantId, companyId, id], onDelete: Restrict)
+  quotation Quotation?       @relation(fields: [quotationId], references: [id], onDelete: SetNull)
+  invoice   CustomerInvoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  lines     SalesOrderLine[]
+
+  @@unique([tenantId, companyId, number])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status])
+  @@map("sales_orders")
+}
+
+model SalesOrderLine {
+  id           String  @id @default(uuid())
+  salesOrderId String  @map("sales_order_id")
+  productId    String  @map("product_id")
+  qty          Decimal @db.Decimal(14, 2)
+  price        Decimal @db.Decimal(18, 2)
+
+  salesOrder SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([salesOrderId, productId])
+  @@index([salesOrderId])
+  @@map("sales_order_lines")
+}
+
+// Riwayat interaksi & komplain pelanggan (mini-CRM).
+model CustomerInteraction {
+  id              String          @id @default(uuid())
+  tenantId        String          @map("tenant_id")
+  companyId       String          @map("company_id")
+  customerId      String          @map("customer_id")
+  type            InteractionType @default(note)
+  summary         String
+  detail          String          @default("")
+  handledById     String?         @map("handled_by_id")
+  interactionDate DateTime        @default(now()) @map("interaction_date")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  customer  Customer @relation(fields: [tenantId, companyId, customerId], references: [tenantId, companyId, id], onDelete: Cascade)
+  handledBy User?    @relation(fields: [handledById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, companyId, customerId, interactionDate])
+  @@map("customer_interactions")
+}
+
+model CustomerComplaint {
+  id                 String          @id @default(uuid())
+  tenantId           String          @map("tenant_id")
+  companyId          String          @map("company_id")
+  customerId         String          @map("customer_id")
+  salesTransactionId String?         @map("sales_transaction_id")
+  title              String
+  description        String          @default("")
+  status             ComplaintStatus @default(open)
+  resolution         String          @default("")
+  resolvedAt         DateTime?       @map("resolved_at")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company     Company           @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  customer    Customer          @relation(fields: [tenantId, companyId, customerId], references: [tenantId, companyId, id], onDelete: Cascade)
+  transaction SalesTransaction? @relation(fields: [salesTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, companyId, status])
+  @@map("customer_complaints")
+}
+
+// ============================================================
+// FASE 4A — HRM & PAYROLL
+// Employee sengaja terpisah dari User: User adalah identitas login/otorisasi,
+// Employee adalah catatan kepegawaian. Satu orang bisa punya keduanya atau
+// salah satu saja.
+// ============================================================
+
+model Department {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  companyId String   @map("company_id")
+  code      String
+  name      String
+  parentId  String?  @map("parent_id")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company    Company      @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  parent     Department?  @relation("DepartmentTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children   Department[] @relation("DepartmentTree")
+  positions  Position[]
+  employees  Employee[]
+  JobPosting JobPosting[]
+
+  @@unique([tenantId, companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@map("departments")
+}
+
+model Position {
+  id           String   @id @default(uuid())
+  tenantId     String   @map("tenant_id")
+  companyId    String   @map("company_id")
+  departmentId String?  @map("department_id")
+  code         String
+  name         String
+  baseSalary   Decimal  @default(0) @map("base_salary") @db.Decimal(18, 2)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company    Company      @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  department Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  employees  Employee[]
+  JobPosting JobPosting[]
+
+  @@unique([tenantId, companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@map("positions")
+}
+
+model Employee {
+  id              String         @id @default(uuid())
+  tenantId        String         @map("tenant_id")
+  companyId       String         @map("company_id")
+  userId          String?        @unique @map("user_id")
+  employeeNo      String         @map("employee_no")
+  fullName        String         @map("full_name")
+  email           String         @default("")
+  phone           String         @default("")
+  departmentId    String?        @map("department_id")
+  positionId      String?        @map("position_id")
+  managerId       String?        @map("manager_id")
+  employmentType  EmploymentType @default(permanent)
+  hireDate        DateTime       @map("hire_date") @db.Date
+  terminationDate DateTime?      @map("termination_date") @db.Date
+  baseSalary      Decimal        @default(0) @map("base_salary") @db.Decimal(18, 2)
+  bankAccount     String         @default("") @map("bank_account")
+  taxId           String?        @map("tax_id")
+  isActive        Boolean        @default(true) @map("is_active")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company    Company     @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  user       User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  position   Position?   @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  manager    Employee?   @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
+  reports    Employee[]  @relation("EmployeeManager")
+
+  attendance   Attendance[]
+  leaves       LeaveRequest[]
+  payrollItems PayrollItem[]
+
+  timesheets         Timesheet[]
+  managedProjects    Project[]            @relation("ProjectManager")
+  assignedWorkOrders WorkOrder[]          @relation("WorkOrderAssignee")
+  ResourceAllocation ResourceAllocation[]
+  Applicant          Applicant[]
+  KpiTarget          KpiTarget[]
+  PerformanceReview  PerformanceReview[]
+
+  @@unique([tenantId, companyId, employeeNo])
+  @@unique([tenantId, companyId, id])
+  @@unique([tenantId, userId])
+  @@index([tenantId, companyId, isActive])
+  @@map("employees")
+}
+
+model Attendance {
+  id            String           @id @default(uuid())
+  tenantId      String           @map("tenant_id")
+  companyId     String           @map("company_id")
+  employeeId    String           @map("employee_id")
+  date          DateTime         @db.Date
+  status        AttendanceStatus @default(present)
+  checkIn       DateTime?
+  checkOut      DateTime?
+  overtimeHours Decimal          @default(0) @map("overtime_hours") @db.Decimal(6, 2)
+  /// Durasi kerja dihitung dari selisih checkIn–checkOut saat absen pulang.
+  workedHours   Decimal          @default(0) @map("worked_hours") @db.Decimal(6, 2)
+  lateMinutes   Int              @default(0) @map("late_minutes")
+  note          String           @default("")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, companyId, employeeId], references: [tenantId, companyId, id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+  @@index([tenantId, companyId, date])
+  @@map("attendances")
+}
+
+model LeaveRequest {
+  id          String      @id @default(uuid())
+  tenantId    String      @map("tenant_id")
+  companyId   String      @map("company_id")
+  employeeId  String      @map("employee_id")
+  startDate   DateTime    @map("start_date") @db.Date
+  endDate     DateTime    @map("end_date") @db.Date
+  days        Int
+  reason      String      @default("")
+  status      LeaveStatus @default(pending)
+  decidedById String?     @map("decided_by_id")
+  decidedAt   DateTime?   @map("decided_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, companyId, employeeId], references: [tenantId, companyId, id], onDelete: Cascade)
+
+  @@index([tenantId, companyId, status])
+  @@index([tenantId, employeeId])
+  @@map("leave_requests")
+}
+
+model PayrollRun {
+  id                String        @id @default(uuid())
+  tenantId          String        @map("tenant_id")
+  companyId         String        @map("company_id")
+  period            String // format YYYY-MM
+  status            PayrollStatus @default(draft)
+  journalId         String?       @map("journal_id")
+  totalGross        Decimal       @default(0) @map("total_gross") @db.Decimal(18, 2)
+  totalDeduction    Decimal       @default(0) @map("total_deduction") @db.Decimal(18, 2)
+  totalNet          Decimal       @default(0) @map("total_net") @db.Decimal(18, 2)
+  totalEmployerCost Decimal       @default(0) @map("total_employer_cost") @db.Decimal(18, 2)
+  paidAt            DateTime?     @map("paid_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company        @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  journal JournalHeader? @relation(fields: [tenantId, companyId, journalId], references: [tenantId, companyId, id], onDelete: Restrict)
+  items   PayrollItem[]
+
+  @@unique([tenantId, companyId, period])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status])
+  @@map("payroll_runs")
+}
+
+model PayrollItem {
+  id                  String  @id @default(uuid())
+  tenantId            String  @map("tenant_id")
+  companyId           String  @map("company_id")
+  payrollRunId        String  @map("payroll_run_id")
+  employeeId          String  @map("employee_id")
+  baseSalary          Decimal @map("base_salary") @db.Decimal(18, 2)
+  overtimeAmount      Decimal @default(0) @map("overtime_amount") @db.Decimal(18, 2)
+  bonusAmount         Decimal @default(0) @map("bonus_amount") @db.Decimal(18, 2)
+  otherEarning        Decimal @default(0) @map("other_earning") @db.Decimal(18, 2)
+  gross               Decimal @db.Decimal(18, 2)
+  // PPh 21 dihitung dari TaxBracket kategori 'withholding'. Sumber tarif
+  // disimpan per item supaya bisa ditelusuri ketika aturan berubah.
+  pph21Base           Decimal @default(0) @map("pph21_base") @db.Decimal(18, 2)
+  pph21Amount         Decimal @default(0) @map("pph21_amount") @db.Decimal(18, 2)
+  pph21Source         String  @default("") @map("pph21_source")
+  bpjsKesehatan       Decimal @default(0) @map("bpjs_kesehatan") @db.Decimal(18, 2)
+  bpjsKetenagakerjaan Decimal @default(0) @map("bpjs_ketenagakerjaan") @db.Decimal(18, 2)
+  otherDeduction      Decimal @default(0) @map("other_deduction") @db.Decimal(18, 2)
+  totalDeduction      Decimal @map("total_deduction") @db.Decimal(18, 2)
+  net                 Decimal @db.Decimal(18, 2)
+  employerCost        Decimal @default(0) @map("employer_cost") @db.Decimal(18, 2)
+  note                String  @default("")
+
+  tenant   Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company    @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  run      PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee Employee   @relation(fields: [tenantId, companyId, employeeId], references: [tenantId, companyId, id], onDelete: Cascade)
+
+  @@unique([payrollRunId, employeeId])
+  @@index([tenantId, companyId, payrollRunId])
+  @@map("payroll_items")
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 4B — MANUFAKTUR
+// BOM multi-level: satu produk jadi punya recipe dari beberapa komponen.
+// Produksi_double consuming komponen memakai moving average yang sama
+// dengan penjualan, sehingga HPP barang jadi konsisten dengan HPP jual.
+// ═══════════════════════════════════════════════════════════
+
+model BillOfMaterials {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  companyId String   @map("company_id")
+  productId String   @map("product_id")
+  name      String
+  outputQty Decimal  @default(1) @map("output_qty") @db.Decimal(14, 2)
+  version   Int      @default(1)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company          Company           @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  product          Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  lines            BomLine[]
+  productionOrders ProductionOrder[]
+
+  @@unique([tenantId, companyId, productId, version])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, productId, isActive])
+  @@map("bill_of_materials")
+}
+
+model BomLine {
+  id           String  @id @default(uuid())
+  bomId        String  @map("bom_id")
+  productId    String  @map("product_id")
+  qtyRequired  Decimal @map("qty_required") @db.Decimal(14, 2)
+  scrapPercent Decimal @default(0) @map("scrap_percent") @db.Decimal(5, 2)
+
+  bom     BillOfMaterials @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([bomId, productId])
+  @@index([bomId])
+  @@map("bom_lines")
+}
+
+model WorkCenter {
+  id              String         @id @default(uuid())
+  tenantId        String         @map("tenant_id")
+  companyId       String         @map("company_id")
+  code            String
+  name            String
+  /// mesin|fasilitas|tenaga kerja — menentukan apa yang dijadwalkan.
+  kind            WorkCenterKind @default(machine)
+  capacityPerDay  Decimal        @default(0) @map("capacity_per_day") @db.Decimal(14, 2)
+  capacityMinutes Int            @default(480) @map("capacity_minutes")
+  hourlyRate      Decimal        @default(0) @map("hourly_rate") @db.Decimal(18, 2)
+  isActive        Boolean        @default(true) @map("is_active")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  tenant    Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company              @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  schedules ProductionSchedule[]
+
+  @@unique([tenantId, companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@map("work_centers")
+}
+
+/// Satu baris penempatan order pada satu work center di satu tanggal. Angkanya
+/// dipakai untuk mendeteksi overbooking kapasitas sebelum order dijalankan.
+model ProductionSchedule {
+  id                String         @id @default(uuid())
+  tenantId          String         @map("tenant_id")
+  companyId         String         @map("company_id")
+  workCenterId      String         @map("work_center_id")
+  productionOrderId String         @map("production_order_id")
+  scheduledDate     DateTime       @map("scheduled_date") @db.Date
+  startMinutes      Int            @default(0) @map("start_minutes")
+  durationMinutes   Int            @default(0) @map("duration_minutes")
+  status            ScheduleStatus @default(planned)
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company         Company         @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  workCenter      WorkCenter      @relation(fields: [tenantId, companyId, workCenterId], references: [tenantId, companyId, id], onDelete: Cascade)
+  productionOrder ProductionOrder @relation("ProductionScheduleOwner", fields: [productionOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([workCenterId, scheduledDate, startMinutes])
+  @@index([tenantId, companyId, scheduledDate])
+  @@index([productionOrderId])
+  @@map("production_schedules")
+}
+
+model ProductionOrder {
+  id            String           @id @default(uuid())
+  tenantId      String           @map("tenant_id")
+  companyId     String           @map("company_id")
+  number        String
+  productId     String           @map("product_id")
+  bomId         String?          @map("bom_id")
+  warehouseId   String           @map("warehouse_id")
+  /// Order induk untuk level-1; order sub-assembly menunjuk ke induknya.
+  parentOrderId String?          @map("parent_order_id")
+  priority      Int              @default(5)
+  status        ProductionStatus @default(planned)
+  qtyPlanned    Decimal          @map("qty_planned") @db.Decimal(14, 2)
+  qtyProduced   Decimal          @default(0) @map("qty_produced") @db.Decimal(14, 2)
+  materialCost  Decimal          @default(0) @map("material_cost") @db.Decimal(18, 2)
+  laborCost     Decimal          @default(0) @map("labor_cost") @db.Decimal(18, 2)
+  scheduledDate DateTime?        @map("scheduled_date") @db.Date
+  startedAt     DateTime?        @map("started_at")
+  completedAt   DateTime?        @map("completed_at")
+  journalId     String?          @map("journal_id")
+  note          String           @default("")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  tenant        Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company                 @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  product       Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  bom           BillOfMaterials?        @relation(fields: [tenantId, companyId, bomId], references: [tenantId, companyId, id], onDelete: SetNull)
+  warehouse     Warehouse               @relation(fields: [tenantId, companyId, warehouseId], references: [tenantId, companyId, id], onDelete: Restrict)
+  journal       JournalHeader?          @relation(fields: [tenantId, companyId, journalId], references: [tenantId, companyId, id], onDelete: Restrict)
+  consumptions  ProductionConsumption[]
+  qualityChecks QualityCheck[]
+  parentOrder   ProductionOrder?        @relation("ProductionTree", fields: [parentOrderId], references: [id], onDelete: Cascade)
+  subOrders     ProductionOrder[]       @relation("ProductionTree")
+  schedules     ProductionSchedule[]    @relation("ProductionScheduleOwner")
+
+  @@unique([tenantId, companyId, number])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status])
+  @@index([parentOrderId])
+  @@map("production_orders")
+}
+
+model ProductionConsumption {
+  id                String   @id @default(uuid())
+  tenantId          String   @map("tenant_id")
+  companyId         String   @map("company_id")
+  productionOrderId String   @map("production_order_id")
+  productId         String   @map("product_id")
+  qty               Decimal  @db.Decimal(14, 2)
+  unitCost          Decimal  @map("unit_cost") @db.Decimal(18, 4)
+  totalCost         Decimal  @map("total_cost") @db.Decimal(18, 2)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company         @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  order   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productionOrderId, productId])
+  @@index([tenantId, companyId, productId])
+  @@map("production_consumptions")
+}
+
+model QualityCheck {
+  id                String        @id @default(uuid())
+  tenantId          String        @map("tenant_id")
+  companyId         String        @map("company_id")
+  productionOrderId String        @map("production_order_id")
+  /// Tahap dalam alur produksi, bukan teks bebas: urutan QC dijaga oleh
+  /// QcStageConfig sehingga tahap tidak bisa dilewati atau diulang.
+  stage             QcStage
+  result            QualityResult @default(pending)
+  checkedQty        Decimal       @default(0) @map("checked_qty") @db.Decimal(14, 2)
+  defectQty         Decimal       @default(0) @map("defect_qty") @db.Decimal(14, 2)
+  note              String        @default("")
+  inspectedById     String?       @map("inspected_by_id")
+  inspectedAt       DateTime      @default(now()) @map("inspected_at")
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company     Company         @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  order       ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  inspectedBy User?           @relation(fields: [inspectedById], references: [id], onDelete: SetNull)
+
+  @@unique([productionOrderId, stage])
+  @@index([tenantId, companyId, result])
+  @@map("quality_checks")
+}
+
+/// Tahap QC yang wajib dilalui untuk sebuah produk, beserta urutannya.
+model QcStageConfig {
+  id         String  @id @default(uuid())
+  tenantId   String  @map("tenant_id")
+  companyId  String  @map("company_id")
+  productId  String  @map("product_id")
+  stage      QcStage
+  sortOrder  Int     @default(1)
+  isRequired Boolean @default(true) @map("is_required")
+  minPassPct Decimal @default(100) @map("min_pass_pct") @db.Decimal(5, 2)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, stage])
+  @@index([tenantId, companyId, productId])
+  @@map("qc_stage_configs")
+}
+
 model Warehouse {
-  id       String  @id @default(uuid())
-  tenantId String  @map("tenant_id")
-  outletId String? @map("outlet_id")
-  name     String
-  location String  @default("")
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  companyId String   @map("company_id")
+  outletId  String?  @map("outlet_id")
+  code      String
+  name      String
+  location  String   @default("")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  outlet  Outlet?          @relation(fields: [outletId], references: [id], onDelete: SetNull)
-  stocks  InventoryStock[]
-  movements StockMovement[]
-  purchaseOrders PurchaseOrder[]
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company          Company           @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  outlet           Outlet?           @relation(fields: [outletId], references: [id], onDelete: SetNull)
+  stocks           InventoryStock[]
+  stockOps         StockOp[]
+  movements        StockMovement[]
+  purchaseOrders   PurchaseOrder[]
+  transfersOut     StockTransfer[]   @relation("TransferFrom")
+  salesOrders      SalesOrder[]
+  transfersIn      StockTransfer[]   @relation("TransferTo")
+  productionOrders ProductionOrder[]
 
-  @@index([tenantId])
+  @@unique([tenantId, companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, isActive])
   @@map("warehouses")
+}
+
+// Stock op: dokumen periode stock (opening / closing) per warehouse.
+// Satu warehouse hanya boleh punya satu op OPEN pada satu waktu.
+enum StockOpStatus {
+  open
+  closed
+}
+
+enum DepreciationMethod {
+  straight_line
+  declining_balance
+}
+
+enum AssetStatus {
+  active
+  fully_depreciated
+  disposed
+}
+
+enum RequisitionStatus {
+  draft
+  submitted
+  approved
+  rejected
+  converted
+}
+
+enum TransferStatus {
+  draft
+  in_transit
+  received
+  cancelled
+}
+
+enum ReconciliationStatus {
+  draft
+  reconciled
+}
+
+enum LeadStatus {
+  new
+  contacted
+  qualified
+  converted
+  lost
+}
+
+enum OpportunityStage {
+  prospecting
+  qualification
+  proposal
+  negotiation
+  closed_won
+  closed_lost
+}
+
+enum QuotationStatus {
+  draft
+  sent
+  accepted
+  rejected
+  expired
+  /// Sudah menjadi SalesOrder. Dipakai sebagai klaim atomik saat konversi
+  /// supaya dua permintaan bersamaan tidak menghasilkan dua pesanan.
+  converted
+}
+
+enum SalesOrderStatus {
+  draft
+  confirmed
+  fulfilled
+  cancelled
+}
+
+enum InteractionType {
+  call
+  email
+  visit
+  meeting
+  note
+}
+
+enum ComplaintStatus {
+  open
+  in_progress
+  resolved
+}
+
+enum AttendanceStatus {
+  present
+  absent
+  leave
+  half_day
+}
+
+enum LeaveStatus {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
+enum PayrollStatus {
+  draft
+  approved
+  paid
+  cancelled
+}
+
+enum PayrollItemType {
+  earning
+  deduction
+  employer_cost
+}
+
+enum EmploymentType {
+  permanent
+  contract
+  intern
+}
+
+enum ProductionStatus {
+  planned
+  released
+  in_progress
+  completed
+  cancelled
+}
+
+enum QualityResult {
+  pending
+  passed
+  failed
+}
+
+/// Tahap QC yang bisa diwajibkan pada produk. Enum, bukan teks bebas, supaya
+/// urutan tahap bisa dijaga dan tidak bisa dilewati diam-diam.
+enum QcStage {
+  incoming
+  in_process
+  final
+}
+
+enum WorkCenterKind {
+  machine
+  facility
+  labor
+}
+
+enum ScheduleStatus {
+  planned
+  started
+  done
+  cancelled
+}
+
+enum ProjectStatus {
+  planning
+  active
+  on_hold
+  completed
+  cancelled
+}
+
+enum TimesheetStatus {
+  submitted
+  approved
+  rejected
+}
+
+enum ShipmentStatus {
+  pending
+  in_transit
+  delivered
+  cancelled
+}
+
+enum VehicleStatus {
+  available
+  in_use
+  maintenance
+}
+
+enum MaintenanceStatus {
+  scheduled
+  in_progress
+  completed
+  cancelled
+}
+
+enum WorkOrderStatus {
+  open
+  in_progress
+  completed
+  closed
+}
+
+enum WorkOrderPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 4C — PROYEK & SCM
+// ═══════════════════════════════════════════════════════════
+
+/// Penempatan orang ke proyek beserta porsi waktunya. Ini sumber data bagi
+/// deteksi double-booking dan beban kerja, bukan sekadar catatan.
+model ResourceAllocation {
+  id            String    @id @default(uuid())
+  tenantId      String    @map("tenant_id")
+  companyId     String    @map("company_id")
+  projectId     String    @map("project_id")
+  employeeId    String    @map("employee_id")
+  /// Persen waktu kerja penuh yang dialokasikan (100 = full time).
+  allocationPct Int       @map("allocation_pct")
+  hoursPerWeek  Decimal   @default(40) @map("hours_per_week") @db.Decimal(5, 2)
+  startDate     DateTime  @map("start_date") @db.Date
+  endDate       DateTime? @map("end_date") @db.Date
+  role          String    @default("")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, employeeId, startDate])
+  @@index([tenantId, companyId, employeeId, startDate])
+  @@map("resource_allocations")
+}
+
+/// Riwayat status pengiriman dari ekspedisi. Webhook pihak ketiga menulis di
+/// sini sehingga status yang terlihat di aplikasi punya sumber dan waktunya.
+model ShipmentEvent {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  companyId   String   @map("company_id")
+  shipmentId  String   @map("shipment_id")
+  status      String
+  description String   @default("")
+  location    String   @default("")
+  occurredAt  DateTime @map("occurred_at")
+  source      String   @default("manual")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, occurredAt])
+  @@map("shipment_events")
+}
+
+/// Lowongan pekerjaan yang dibuka untuk rekrutmen.
+model JobPosting {
+  id             String    @id @default(uuid())
+  tenantId       String    @map("tenant_id")
+  companyId      String    @map("company_id")
+  title          String
+  departmentId   String?   @map("department_id")
+  positionId     String?   @map("position_id")
+  description    String    @default("")
+  employmentType String    @default("full_time") @map("employment_type")
+  salaryMin      Decimal?  @map("salary_min") @db.Decimal(18, 2)
+  salaryMax      Decimal?  @map("salary_max") @db.Decimal(18, 2)
+  status         JobStatus @default(open)
+  openings       Int       @default(1)
+  openedAt       DateTime  @default(now()) @map("opened_at")
+  closedAt       DateTime? @map("closed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company    Company     @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  position   Position?   @relation(fields: [positionId], references: [id], onDelete: SetNull)
+  applicants Applicant[]
+
+  @@index([tenantId, companyId, status])
+  @@map("job_postings")
+}
+
+/// Pelamar dan proses seleksinya. `employeeId` terisi menandakan pelamar
+/// sudah hired sehingga onboarding bisa dimulai tanpa input ulang.
+model Applicant {
+  id             String         @id @default(uuid())
+  tenantId       String         @map("tenant_id")
+  companyId      String         @map("company_id")
+  jobPostingId   String         @map("job_posting_id")
+  fullName       String         @map("full_name")
+  email          String
+  phone          String         @default("")
+  resumeUrl      String         @default("") @map("resume_url")
+  coverNote      String         @default("") @map("cover_note")
+  stage          ApplicantStage @default(applied)
+  rating         Int?
+  rejectReason   String         @default("") @map("reject_reason")
+  appliedAt      DateTime       @default(now()) @map("applied_at")
+  hiredAt        DateTime?      @map("hired_at")
+  employeeId     String?        @map("employee_id")
+  onboardingDone Boolean        @default(false) @map("onboarding_done")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company    Company    @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  jobPosting JobPosting @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)
+  employee   Employee?  @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, jobPostingId, email])
+  @@index([tenantId, companyId, stage])
+  @@map("applicants")
+}
+
+/// Definisi KPI beserta target dan hasil penilaian. Target disimpan per
+/// periode supaya penilaian periode lalu tidak berubah ketika target baru
+/// dibuat untuk periode berikutnya.
+model KpiDefinition {
+  id             String   @id @default(uuid())
+  tenantId       String   @map("tenant_id")
+  companyId      String   @map("company_id")
+  code           String
+  name           String
+  description    String   @default("")
+  unit           String   @default("number")
+  /// Makin tinggi makin baik (penjualan) atau makin rendah makin baik (biaya).
+  higherIsBetter Boolean  @default(true) @map("higher_is_better")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  tenant  Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company     @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  targets KpiTarget[]
+
+  @@unique([tenantId, companyId, code])
+  @@map("kpi_definitions")
+}
+
+model KpiTarget {
+  id         String    @id @default(uuid())
+  tenantId   String    @map("tenant_id")
+  companyId  String    @map("company_id")
+  kpiId      String    @map("kpi_id")
+  employeeId String    @map("employee_id")
+  period     String
+  target     Decimal   @db.Decimal(18, 2)
+  actual     Decimal?  @db.Decimal(18, 2)
+  weight     Decimal   @default(1) @db.Decimal(5, 2)
+  dueDate    DateTime? @map("due_date") @db.Date
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company       @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  kpi      KpiDefinition @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+  employee Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, kpiId, employeeId, period])
+  @@index([tenantId, companyId, period])
+  @@map("kpi_targets")
+}
+
+/// Hasil penilaian kinerja per employee per periode, dihitung dari pencapaian
+/// KPI. Menyimpan salinan skor supaya nilai yang terlihat tidak berubah
+/// quando target KPI diedit kemudian.
+model PerformanceReview {
+  id           String       @id @default(uuid())
+  tenantId     String       @map("tenant_id")
+  companyId    String       @map("company_id")
+  employeeId   String       @map("employee_id")
+  period       String
+  score        Decimal      @default(0) @db.Decimal(5, 2)
+  grade        String       @default("")
+  strengths    String       @default("")
+  improvements String       @default("")
+  reviewerId   String?      @map("reviewer_id")
+  status       ReviewStatus @default(draft)
+  reviewedAt   DateTime?    @map("reviewed_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company  @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, companyId, employeeId, period])
+  @@index([tenantId, companyId, period])
+  @@map("performance_reviews")
+}
+
+/// Perangkat sensor IoT (thermometer gudang, counter mesin, dll) dan
+/// pembacaannya. Pembacaan sengaja terpisah dari stok: sensor melaporkan
+/// angka, keputusan-adjustment tetap lewat StockOp agar tetap ada jejak audit.
+model SensorDevice {
+  id           String     @id @default(uuid())
+  tenantId     String     @map("tenant_id")
+  companyId    String     @map("company_id")
+  code         String
+  name         String
+  type         SensorType
+  warehouseId  String?    @map("warehouse_id")
+  workCenterId String?    @map("work_center_id")
+  unit         String     @default("")
+  apiKey       String     @map("api_key")
+  isActive     Boolean    @default(true) @map("is_active")
+  lastSeenAt   DateTime?  @map("last_seen_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company         @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  readings SensorReading[]
+
+  @@unique([tenantId, code])
+  @@map("sensor_devices")
+}
+
+model SensorReading {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  companyId  String   @map("company_id")
+  deviceId   String   @map("device_id")
+  value      Decimal  @db.Decimal(14, 4)
+  recordedAt DateTime @map("recorded_at")
+
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company      @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  device  SensorDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, recordedAt])
+  @@map("sensor_readings")
+}
+
+/// Hasil pembacaan struk/invoice dari OCR vision, disimpan supaya hasilnya
+/// bisa dikoreksi manusia sebelum dipakai membuat dokumen.
+model OcrResult {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  companyId   String    @map("company_id")
+  source      String    @default("upload")
+  fileName    String    @default("") @map("file_name")
+  mimeType    String    @default("") @map("mime_type")
+  status      OcrStatus @default(pending)
+  rawText     String    @default("") @map("raw_text")
+  fields      Json      @default("{}")
+  confidence  Decimal   @default(0) @db.Decimal(5, 4)
+  error       String?
+  createdById String?   @map("created_by_id")
+  reviewedAt  DateTime? @map("reviewed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, companyId, status])
+  @@map("ocr_results")
+}
+
+enum JobStatus {
+  draft
+  open
+  on_hold
+  closed
+}
+
+enum ApplicantStage {
+  applied
+  screening
+  interview
+  offer
+  hired
+  rejected
+}
+
+enum ReviewStatus {
+  draft
+  submitted
+  acknowledged
+}
+
+enum SensorType {
+  temperature
+  humidity
+  counter
+  weight
+  vibration
+  power
+}
+
+enum OcrStatus {
+  pending
+  processed
+  needs_review
+  failed
+}
+
+model Project {
+  id          String        @id @default(uuid())
+  tenantId    String        @map("tenant_id")
+  companyId   String        @map("company_id")
+  code        String
+  name        String
+  customerId  String?       @map("customer_id")
+  managerId   String?       @map("manager_id")
+  status      ProjectStatus @default(planning)
+  budget      Decimal       @default(0) @db.Decimal(18, 2)
+  startDate   DateTime?     @map("start_date") @db.Date
+  endDate     DateTime?     @map("end_date") @db.Date
+  description String        @default("")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  tenant             Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company            Company              @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  customer           Customer?            @relation(fields: [tenantId, companyId, customerId], references: [tenantId, companyId, id], onDelete: SetNull)
+  manager            Employee?            @relation("ProjectManager", fields: [managerId], references: [id], onDelete: SetNull)
+  milestones         ProjectMilestone[]
+  timesheets         Timesheet[]
+  invoices           CustomerInvoice[]
+  ResourceAllocation ResourceAllocation[]
+
+  @@unique([tenantId, companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status])
+  @@map("projects")
+}
+
+model ProjectMilestone {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  companyId   String    @map("company_id")
+  projectId   String    @map("project_id")
+  name        String
+  /// Tanggal mulai & selesai — dasar render Gantt. Tanpa keduanya hanya ada
+  /// tenggat, jadi graf batang tidak bisa digambar.
+  startDate   DateTime? @map("start_date") @db.Date
+  dueDate     DateTime? @map("due_date") @db.Date
+  completedAt DateTime? @map("completed_at")
+  /// Persentase selesai 0–100; dipakai untuk ringkasan progres proyek.
+  progress    Int       @default(0)
+  note        String    @default("")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  tenant    Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company               @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  project   Project               @relation(fields: [tenantId, companyId, projectId], references: [tenantId, companyId, id], onDelete: Cascade)
+  /// Preseden yang harus selesai lebih dulu (finish-to-start).
+  dependsOn MilestoneDependency[] @relation("MilestoneSuccessor")
+  blocks    MilestoneDependency[] @relation("MilestonePredecessor")
+
+  @@unique([projectId, name])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, projectId])
+  @@map("project_milestones")
+}
+
+/// Ketergantungan antar-milestone untuk Gantt: A harus selesai sebelum B
+/// dimulai. Disimpan sebagai sisi kedua supaya kedua arah bisa di-query.
+model MilestoneDependency {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  companyId   String   @map("company_id")
+  projectId   String   @map("project_id")
+  milestoneId String   @map("milestone_id")
+  dependsOnId String   @map("depends_on_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company          @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  milestone ProjectMilestone @relation("MilestoneSuccessor", fields: [tenantId, companyId, milestoneId], references: [tenantId, companyId, id], onDelete: Cascade)
+  dependsOn ProjectMilestone @relation("MilestonePredecessor", fields: [tenantId, companyId, dependsOnId], references: [tenantId, companyId, id], onDelete: Cascade)
+
+  @@unique([milestoneId, dependsOnId])
+  @@index([tenantId, companyId, projectId])
+  @@map("milestone_dependencies")
+}
+
+model Timesheet {
+  id              String          @id @default(uuid())
+  tenantId        String          @map("tenant_id")
+  companyId       String          @map("company_id")
+  projectId       String          @map("project_id")
+  employeeId      String          @map("employee_id")
+  workDate        DateTime        @map("work_date") @db.Date
+  hours           Decimal         @db.Decimal(6, 2)
+  hourlyRate      Decimal         @default(0) @map("hourly_rate") @db.Decimal(18, 2)
+  billable        Boolean         @default(true)
+  status          TimesheetStatus @default(submitted)
+  note            String          @default("")
+  /// Timesheet yang sudah ikut difakturkan ke klien. Tanpa penanda ini,
+  /// billProject bisa dijalankan berulang atas jam yang sama.
+  billedAt        DateTime?       @map("billed_at")
+  billedInvoiceId String?         @map("billed_invoice_id")
+  approvedById    String?         @map("approved_by_id")
+  approvedAt      DateTime?       @map("approved_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company          @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  project       Project          @relation(fields: [tenantId, companyId, projectId], references: [tenantId, companyId, id], onDelete: Cascade)
+  employee      Employee         @relation(fields: [tenantId, companyId, employeeId], references: [tenantId, companyId, id], onDelete: Cascade)
+  billedInvoice CustomerInvoice? @relation(fields: [billedInvoiceId], references: [id], onDelete: SetNull)
+
+  @@unique([employeeId, workDate])
+  @@index([tenantId, companyId, projectId, status])
+  @@index([tenantId, projectId, billedAt])
+  @@map("timesheets")
+}
+
+model Shipment {
+  id                    String         @id @default(uuid())
+  tenantId              String         @map("tenant_id")
+  companyId             String         @map("company_id")
+  number                String
+  outletId              String?        @map("outlet_id")
+  vehicleId             String?        @map("vehicle_id")
+  status                ShipmentStatus @default(pending)
+  origin                String         @default("")
+  destination           String         @default("")
+  shippedAt             DateTime?      @map("shipped_at")
+  deliveredAt           DateTime?      @map("delivered_at")
+  receiverName          String         @default("") @map("receiver_name")
+  note                  String         @default("")
+  carrierName           String?        @map("carrier_name")
+  carrierTrackingNumber String?        @unique @map("carrier_tracking_number")
+  carrierWebhookSecret  String?        @map("carrier_webhook_secret")
+  createdAt             DateTime       @default(now()) @map("created_at")
+  updatedAt             DateTime       @updatedAt @map("updated_at")
+
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company         @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  outlet        Outlet?         @relation(fields: [outletId], references: [id], onDelete: SetNull)
+  vehicle       Vehicle?        @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  items         ShipmentItem[]
+  ShipmentEvent ShipmentEvent[]
+
+  @@unique([tenantId, companyId, number])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status])
+  @@map("shipments")
+}
+
+model ShipmentItem {
+  id         String  @id @default(uuid())
+  shipmentId String  @map("shipment_id")
+  productId  String  @map("product_id")
+  qty        Decimal @db.Decimal(14, 2)
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([shipmentId, productId])
+  @@index([shipmentId])
+  @@map("shipment_items")
+}
+
+model Vehicle {
+  id          String        @id @default(uuid())
+  tenantId    String        @map("tenant_id")
+  companyId   String        @map("company_id")
+  plateNumber String        @map("plate_number")
+  name        String
+  type        String        @default("van")
+  capacityKg  Decimal       @default(0) @map("capacity_kg") @db.Decimal(14, 2)
+  status      VehicleStatus @default(available)
+  odometerKm  Decimal       @default(0) @map("odometer_km") @db.Decimal(14, 2)
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  tenant               Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company              Company           @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  shipments            Shipment[]
+  fuelLogs             FuelLog[]
+  maintenanceSchedules MaintenancePlan[]
+
+  @@unique([tenantId, companyId, plateNumber])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status])
+  @@map("vehicles")
+}
+
+model FuelLog {
+  id            String   @id @default(uuid())
+  tenantId      String   @map("tenant_id")
+  companyId     String   @map("company_id")
+  vehicleId     String   @map("vehicle_id")
+  date          DateTime @db.Date
+  liters        Decimal  @db.Decimal(10, 2)
+  pricePerLiter Decimal  @map("price_per_liter") @db.Decimal(14, 2)
+  totalCost     Decimal  @map("total_cost") @db.Decimal(18, 2)
+  odometerKm    Decimal  @default(0) @map("odometer_km") @db.Decimal(14, 2)
+  station       String   @default("")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  vehicle Vehicle @relation(fields: [tenantId, companyId, vehicleId], references: [tenantId, companyId, id], onDelete: Cascade)
+
+  @@index([tenantId, companyId, vehicleId, date])
+  @@map("fuel_logs")
+}
+
+// ═══════════════════════════════════════════════════════════
+// FASE 4D — EAM (maintenance & work order)
+// ═══════════════════════════════════════════════════════════
+
+model MaintenancePlan {
+  id           String    @id @default(uuid())
+  tenantId     String    @map("tenant_id")
+  companyId    String    @map("company_id")
+  assetRef     String    @map("asset_ref")
+  description  String
+  intervalDays Int       @map("interval_days")
+  lastDoneAt   DateTime? @map("last_done_at")
+  nextDueAt    DateTime? @map("next_due_at")
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  vehicleRefId String?   @map("vehicle_ref")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company    Company     @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  vehicle    Vehicle?    @relation(fields: [tenantId, companyId, vehicleRefId], references: [tenantId, companyId, id], onDelete: Cascade)
+  workOrders WorkOrder[]
+
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, nextDueAt])
+  @@map("maintenance_plans")
+}
+
+model WorkOrder {
+  id                String            @id @default(uuid())
+  tenantId          String            @map("tenant_id")
+  companyId         String            @map("company_id")
+  number            String
+  title             String
+  description       String            @default("")
+  assetRef          String            @default("") @map("asset_ref")
+  vehicleRef        String?           @map("vehicle_ref")
+  maintenancePlanId String?           @map("maintenance_plan_id")
+  status            WorkOrderStatus   @default(open)
+  priority          WorkOrderPriority @default(medium)
+  assigneeId        String?           @map("assignee_id")
+  scheduledFor      DateTime?         @map("scheduled_for")
+  startedAt         DateTime?         @map("started_at")
+  completedAt       DateTime?         @map("completed_at")
+  laborCost         Decimal           @default(0) @map("labor_cost") @db.Decimal(18, 2)
+  partsCost         Decimal           @default(0) @map("parts_cost") @db.Decimal(18, 2)
+  resolution        String            @default("")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company         Company          @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  maintenancePlan MaintenancePlan? @relation(fields: [maintenancePlanId], references: [id], onDelete: SetNull)
+  assignee        Employee?        @relation("WorkOrderAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, companyId, number])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, status, priority])
+  @@map("work_orders")
+}
+
+model StockOp {
+  id          String        @id @default(uuid())
+  tenantId    String        @map("tenant_id")
+  companyId   String        @map("company_id")
+  warehouseId String        @map("warehouse_id")
+  code        String
+  status      StockOpStatus @default(open)
+  note        String        @default("")
+  openedAt    DateTime      @default(now()) @map("opened_at")
+  closedAt    DateTime?     @map("closed_at")
+
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company       @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  warehouse Warehouse     @relation(fields: [tenantId, companyId, warehouseId], references: [tenantId, companyId, id], onDelete: Cascade)
+  lines     StockOpLine[]
+
+  @@unique([tenantId, companyId, code])
+  @@index([tenantId, warehouseId, status])
+  @@map("stock_ops")
+}
+
+model StockOpLine {
+  id         String   @id @default(uuid())
+  stockOpId  String   @map("stock_op_id")
+  productId  String   @map("product_id")
+  systemQty  Decimal  @map("system_qty") @db.Decimal(14, 2)
+  countedQty Decimal? @map("counted_qty") @db.Decimal(14, 2)
+  variance   Decimal  @default(0) @db.Decimal(14, 2)
+  note       String   @default("")
+
+  stockOp StockOp @relation(fields: [stockOpId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([stockOpId, productId])
+  @@index([stockOpId])
+  @@map("stock_op_lines")
 }
 
 model InventoryStock {
   id           String   @id @default(uuid())
   tenantId     String   @map("tenant_id")
+  companyId    String   @map("company_id")
   productId    String   @map("product_id")
   warehouseId  String   @map("warehouse_id")
   quantity     Decimal  @default(0) @db.Decimal(14, 2)
   minThreshold Decimal  @default(0) @map("min_threshold") @db.Decimal(14, 2)
+  avgCost      Decimal  @default(0) @map("avg_cost") @db.Decimal(18, 4)
   lastUpdated  DateTime @updatedAt @map("last_updated")
 
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company   @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
   product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [tenantId, companyId, warehouseId], references: [tenantId, companyId, id], onDelete: Cascade)
 
-  @@unique([productId, warehouseId])
+  @@unique([tenantId, companyId, productId, warehouseId])
   @@index([tenantId])
   @@map("inventory_stock")
 }
@@ -287,6 +2529,7 @@ model InventoryStock {
 model StockMovement {
   id          String       @id @default(uuid())
   tenantId    String       @map("tenant_id")
+  companyId   String       @map("company_id")
   productId   String       @map("product_id")
   warehouseId String       @map("warehouse_id")
   type        MovementType
@@ -296,94 +2539,149 @@ model StockMovement {
   createdAt   DateTime     @default(now()) @map("created_at")
 
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company   @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
   product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  warehouse Warehouse @relation(fields: [tenantId, companyId, warehouseId], references: [tenantId, companyId, id], onDelete: Cascade)
 
   @@index([tenantId, productId, createdAt])
+  @@index([tenantId, refId])
   @@map("stock_movements")
 }
 
 model Supplier {
-  id       String @id @default(uuid())
-  tenantId String @map("tenant_id")
-  name     String
-  contact  String @default("")
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  companyId       String   @map("company_id")
+  code            String
+  name            String
+  contact         String   @default("")
+  email           String   @default("")
+  phone           String   @default("")
+  taxId           String?  @map("tax_id")
+  address         String   @default("")
+  city            String   @default("")
+  paymentTermDays Int      @default(0) @map("payment_term_days")
+  creditLimit     Decimal? @map("credit_limit") @db.Decimal(18, 2)
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
-  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company        Company             @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
   purchaseOrders PurchaseOrder[]
+  vendorBills    VendorBill[]
+  vendorPayments VendorPayment[]
+  performance    VendorPerformance[]
 
-  @@index([tenantId])
+  @@unique([tenantId, companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, isActive])
   @@map("suppliers")
 }
 
 model PurchaseOrder {
   id          String   @id @default(uuid())
   tenantId    String   @map("tenant_id")
+  companyId   String   @map("company_id")
   code        String
   supplierId  String   @map("supplier_id")
   warehouseId String   @map("warehouse_id")
   status      POStatus @default(draft)
   createdAt   DateTime @default(now()) @map("created_at")
 
-  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  supplier  Supplier            @relation(fields: [supplierId], references: [id])
-  warehouse Warehouse           @relation(fields: [warehouseId], references: [id])
-  items     PurchaseOrderItem[]
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company     Company              @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  supplier    Supplier             @relation(fields: [tenantId, companyId, supplierId], references: [tenantId, companyId, id])
+  warehouse   Warehouse            @relation(fields: [tenantId, companyId, warehouseId], references: [tenantId, companyId, id])
+  items       PurchaseOrderItem[]
+  vendorBills VendorBill[]
+  requisition PurchaseRequisition?
 
-  @@unique([tenantId, code])
+  @@unique([tenantId, companyId, code])
   @@index([tenantId])
   @@map("purchase_orders")
 }
 
 model PurchaseOrderItem {
-  id        String  @id @default(uuid())
-  poId      String  @map("po_id")
-  productId String  @map("product_id")
-  qty       Decimal @db.Decimal(14, 2)
-  price     Decimal @db.Decimal(14, 2)
+  id          String  @id @default(uuid())
+  poId        String  @map("po_id")
+  productId   String  @map("product_id")
+  qty         Decimal @db.Decimal(14, 2)
+  /// Jumlah yang ditolak saat penerimaan. Dipakai untuk skor kualitas vendor.
+  qtyRejected Decimal @default(0) @map("qty_rejected") @db.Decimal(14, 2)
+  price       Decimal @db.Decimal(14, 2)
 
   po      PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
   product Product       @relation(fields: [productId], references: [id])
 
+  @@index([poId])
+  @@index([productId])
   @@map("purchase_order_items")
 }
 
 model Customer {
-  id            String @id @default(uuid())
-  tenantId      String @map("tenant_id")
-  name          String
-  contact       String @default("")
-  loyaltyPoints Int    @default(0) @map("loyalty_points")
-  createdAt     DateTime @default(now()) @map("created_at")
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  companyId       String   @map("company_id")
+  code            String
+  name            String
+  contact         String   @default("")
+  email           String   @default("")
+  phone           String   @default("")
+  taxId           String?  @map("tax_id")
+  address         String   @default("")
+  city            String   @default("")
+  paymentTermDays Int      @default(0) @map("payment_term_days")
+  creditLimit     Decimal? @map("credit_limit") @db.Decimal(18, 2)
+  isActive        Boolean  @default(true) @map("is_active")
+  loyaltyPoints   Int      @default(0) @map("loyalty_points")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
-  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  transactions SalesTransaction[]
+  tenant           Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company          Company               @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  transactions     SalesTransaction[]
+  customerInvoices CustomerInvoice[]
+  customerReceipts CustomerReceipt[]
+  salesOrders      SalesOrder[]
+  opportunities    Opportunity[]
+  quotations       Quotation[]
+  interactions     CustomerInteraction[]
+  complaints       CustomerComplaint[]
+  leads            Lead[]
+  projects         Project[]
 
-  @@index([tenantId])
+  @@unique([tenantId, companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, isActive])
   @@map("customers")
 }
 
 model SalesTransaction {
-  id                String         @id @default(uuid())
-  tenantId          String         @map("tenant_id")
-  outletId          String?        @map("outlet_id")
-  cashierId         String?        @map("cashier_id")
-  customerId        String?        @map("customer_id")
-  clientGeneratedId String         @map("client_generated_id")
-  syncStatus        SyncStatus     @default(synced) @map("sync_status")
-  clientTimestamp   DateTime       @map("client_timestamp")
-  serverTimestamp   DateTime?      @map("server_timestamp")
-  total             Decimal        @db.Decimal(14, 2)
-  paymentMethod     PaymentMethod  @map("payment_method")
-  createdAt         DateTime       @default(now()) @map("created_at")
+  id                String        @id @default(uuid())
+  tenantId          String        @map("tenant_id")
+  companyId         String        @map("company_id")
+  outletId          String?       @map("outlet_id")
+  cashierId         String?       @map("cashier_id")
+  customerId        String?       @map("customer_id")
+  clientGeneratedId String        @map("client_generated_id")
+  syncStatus        SyncStatus    @default(synced) @map("sync_status")
+  clientTimestamp   DateTime      @map("client_timestamp")
+  serverTimestamp   DateTime?     @map("server_timestamp")
+  total             Decimal       @db.Decimal(14, 2)
+  paymentMethod     PaymentMethod @map("payment_method")
+  createdAt         DateTime      @default(now()) @map("created_at")
 
-  tenant   Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  outlet   Outlet?                @relation(fields: [outletId], references: [id], onDelete: SetNull)
-  cashier  User?                  @relation(fields: [cashierId], references: [id], onDelete: SetNull)
-  customer Customer?              @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  items    SalesTransactionItem[]
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company          Company                @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  outlet           Outlet?                @relation(fields: [outletId], references: [id], onDelete: SetNull)
+  cashier          User?                  @relation(fields: [cashierId], references: [id], onDelete: SetNull)
+  customer         Customer?              @relation(fields: [tenantId, companyId, customerId], references: [tenantId, companyId, id], onDelete: Restrict)
+  items            SalesTransactionItem[]
+  customerInvoices CustomerInvoice[]
+  complaints       CustomerComplaint[]
 
-  @@unique([tenantId, clientGeneratedId])
+  @@unique([tenantId, companyId, clientGeneratedId])
   @@index([tenantId, clientTimestamp])
   @@index([tenantId, syncStatus])
   @@map("sales_transactions")
@@ -399,26 +2697,183 @@ model SalesTransactionItem {
   transaction SalesTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   product     Product          @relation(fields: [productId], references: [id])
 
+  @@index([transactionId])
+  @@index([productId])
   @@map("sales_transaction_items")
 }
 
 model ChartOfAccount {
-  id       String      @id @default(uuid())
-  tenantId String      @map("tenant_id")
-  code     String
-  name     String
-  type     AccountType
+  id        String      @id @default(uuid())
+  tenantId  String      @map("tenant_id")
+  companyId String      @map("company_id")
+  parentId  String?     @map("parent_id")
+  code      String
+  name      String
+  type      AccountType
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company         Company          @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  parent          ChartOfAccount?  @relation("AccountTree", fields: [tenantId, companyId, parentId], references: [tenantId, companyId, id], onDelete: Restrict)
+  children        ChartOfAccount[] @relation("AccountTree")
+  journalLines    JournalLine[]
+  openingBalances OpeningBalance[]
+  bankAccounts    BankAccount[]
+  debitEntries    FinancialEntry[] @relation("FinancialDebitAccount")
+  creditEntries   FinancialEntry[] @relation("FinancialCreditAccount")
 
-  @@unique([tenantId, code])
+  @@unique([companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, parentId])
   @@map("chart_of_accounts")
+}
+
+// JournalHeader + JournalLine menggantikan FinancialEntry sebagai ledger utama.
+// FinancialEntry dipertahankan sementara sebagai compatibility mirror SBS.
+model JournalHeader {
+  id           String        @id @default(uuid())
+  tenantId     String        @map("tenant_id")
+  companyId    String        @map("company_id")
+  number       String
+  entryDate    DateTime      @map("entry_date")
+  periodId     String        @map("period_id")
+  status       JournalStatus @default(draft)
+  memo         String        @default("")
+  sourceModule String        @map("source_module")
+  sourceRefId  String?       @map("source_ref_id")
+  reversalOfId String?       @map("reversal_of_id")
+  postedAt     DateTime?     @map("posted_at")
+  postedById   String?       @map("posted_by_id")
+  createdById  String?       @map("created_by_id")
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  tenant              Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company             Company                @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  period              FiscalPeriod           @relation(fields: [tenantId, companyId, periodId], references: [tenantId, companyId, id], onDelete: Restrict)
+  lines               JournalLine[]
+  vendorBills         VendorBill[]
+  vendorPayments      VendorPayment[]
+  customerInvoices    CustomerInvoice[]
+  customerReceipts    CustomerReceipt[]
+  fixedAssets         FixedAsset[]
+  depreciationEntries DepreciationSchedule[]
+  payrollRuns         PayrollRun[]
+  productionJournals  ProductionOrder[]
+  reversalOf          JournalHeader?         @relation("JournalReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversedBy          JournalHeader[]        @relation("JournalReversal")
+  bankStatements      BankStatement[]        @relation("BankStatementJournal")
+
+  @@unique([companyId, number])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, entryDate])
+  @@index([tenantId, companyId, status])
+  @@index([companyId, sourceModule, sourceRefId])
+  @@map("journal_headers")
+}
+
+model JournalLine {
+  id           String           @id @default(uuid())
+  tenantId     String           @map("tenant_id")
+  companyId    String           @map("company_id")
+  journalId    String           @map("journal_id")
+  accountId    String           @map("account_id")
+  lineNo       Int              @map("line_no")
+  direction    JournalDirection
+  amount       Decimal          @db.Decimal(14, 2)
+  memo         String           @default("")
+  partnerId    String?          @map("partner_id")
+  projectId    String?          @map("project_id")
+  costCenterId String?          @map("cost_center_id")
+
+  journal JournalHeader  @relation(fields: [tenantId, companyId, journalId], references: [tenantId, companyId, id], onDelete: Cascade)
+  account ChartOfAccount @relation(fields: [tenantId, companyId, accountId], references: [tenantId, companyId, id], onDelete: Restrict)
+
+  @@unique([journalId, lineNo])
+  @@index([tenantId, companyId, accountId])
+  @@index([tenantId, companyId, partnerId])
+  @@index([tenantId, companyId, projectId])
+  @@map("journal_lines")
+}
+
+model JournalSequence {
+  tenantId   String @map("tenant_id")
+  companyId  String @map("company_id")
+  periodKey  String @map("period_key") // YYYYMM
+  lastNumber Int    @default(0) @map("last_number")
+
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@id([tenantId, companyId, periodKey])
+  @@map("journal_sequences")
+}
+
+model FiscalYear {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  companyId String   @map("company_id")
+  name      String
+  startDate DateTime @map("start_date") @db.Date
+  endDate   DateTime @map("end_date") @db.Date // exclusive boundary
+  isClosed  Boolean  @default(false) @map("is_closed")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  company Company        @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  periods FiscalPeriod[]
+
+  @@unique([companyId, name])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, startDate])
+  @@map("fiscal_years")
+}
+
+model FiscalPeriod {
+  id           String             @id @default(uuid())
+  tenantId     String             @map("tenant_id")
+  companyId    String             @map("company_id")
+  fiscalYearId String             @map("fiscal_year_id")
+  code         String
+  name         String
+  startDate    DateTime           @map("start_date") @db.Date
+  endDate      DateTime           @map("end_date") @db.Date // exclusive boundary
+  status       FiscalPeriodStatus @default(open)
+  closedAt     DateTime?          @map("closed_at")
+  closedById   String?            @map("closed_by_id")
+  createdAt    DateTime           @default(now()) @map("created_at")
+
+  company             Company                @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  fiscalYear          FiscalYear             @relation(fields: [tenantId, companyId, fiscalYearId], references: [tenantId, companyId, id], onDelete: Cascade)
+  journalHeaders      JournalHeader[]
+  openingBalances     OpeningBalance[]
+  depreciationEntries DepreciationSchedule[]
+
+  @@unique([companyId, code])
+  @@unique([tenantId, companyId, id])
+  @@index([tenantId, companyId, startDate, endDate, status])
+  @@map("fiscal_periods")
+}
+
+model OpeningBalance {
+  id        String           @id @default(uuid())
+  tenantId  String           @map("tenant_id")
+  companyId String           @map("company_id")
+  periodId  String           @map("period_id")
+  accountId String           @map("account_id")
+  direction JournalDirection
+  amount    Decimal          @db.Decimal(14, 2)
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  period  FiscalPeriod   @relation(fields: [tenantId, companyId, periodId], references: [tenantId, companyId, id], onDelete: Cascade)
+  account ChartOfAccount @relation(fields: [tenantId, companyId, accountId], references: [tenantId, companyId, id], onDelete: Restrict)
+
+  @@unique([periodId, accountId])
+  @@index([tenantId, companyId, accountId])
+  @@map("opening_balances")
 }
 
 // Jurnal otomatis dari semua transaksi
 model FinancialEntry {
   id               String   @id @default(uuid())
   tenantId         String   @map("tenant_id")
+  companyId        String   @map("company_id")
   sourceModule     String   @map("source_module") // pos | inventory | finance
   sourceRefId      String   @map("source_ref_id")
   debitAccountId   String   @map("debit_account_id")
@@ -428,10 +2883,14 @@ model FinancialEntry {
   isAnomalyFlagged Boolean  @default(false) @map("is_anomaly_flagged")
   createdAt        DateTime @default(now()) @map("created_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company        @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  debitAccount  ChartOfAccount @relation("FinancialDebitAccount", fields: [tenantId, companyId, debitAccountId], references: [tenantId, companyId, id], onDelete: Restrict)
+  creditAccount ChartOfAccount @relation("FinancialCreditAccount", fields: [tenantId, companyId, creditAccountId], references: [tenantId, companyId, id], onDelete: Restrict)
 
   @@index([tenantId, entryDate])
   @@index([tenantId, isAnomalyFlagged])
+  @@index([tenantId, sourceModule, sourceRefId])
   @@map("financial_entries")
 }
 
@@ -449,6 +2908,7 @@ model AiInsightLog {
   createdAt    DateTime    @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
   @@map("ai_insights_log")
@@ -471,16 +2931,24 @@ model AuditLog {
   id        String   @id @default(uuid())
   tenantId  String   @map("tenant_id")
   userId    String?  @map("user_id")
-  action    String // create | update | delete | login | ...
+  action    String // create | update | delete | login | register | refresh | ...
   entity    String // products | sales_transactions | ...
   entityId  String?  @map("entity_id")
+  outcome   String   @default("success") // success | failure
+  reason    String?
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
   before    Json?
   after     Json?
   createdAt DateTime @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
+  @@index([tenantId, entity, entityId])
+  @@index([tenantId, userId, createdAt])
+  @@index([tenantId, action, createdAt])
   @@map("audit_logs")
 }
 
@@ -496,7 +2964,50 @@ model Notification {
   createdAt DateTime         @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, read, createdAt])
   @@map("notifications")
+}
+
+/// Refresh token per perangkat/sesi. Token mentah tidak pernah disimpan: hanya
+/// HMAC-SHA256-nya. Setiap penggunaan merotasi token (usedAt terisi dan baris baru
+/// dibuat dalam family yang sama); memakai ulang token yang sudah dirotasi
+/// dianggap pencurian dan mencabut seluruh family.
+model RefreshSession {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  userId          String    @map("user_id")
+  familyId        String    @map("family_id")
+  tokenHash       String    @unique @map("token_hash")
+  mfaVerified     Boolean   @default(false) @map("mfa_verified")
+  expiresAt       DateTime  @map("expires_at")
+  familyExpiresAt DateTime  @map("family_expires_at")
+  usedAt          DateTime? @map("used_at")
+  revokedAt       DateTime? @map("revoked_at")
+  revokedReason   String?   @map("revoked_reason")
+  ipAddress       String?   @map("ip_address")
+  userAgent       String?   @map("user_agent")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, familyId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_sessions")
+}
+
+/// Penghitung percobaan login gagal (per akun, per akun+IP, per IP). Kunci berupa
+/// hash sehingga email/IP tidak tersimpan mentah. Dipakai bersama oleh semua
+/// instance API sehingga lock tidak hilang saat restart atau dibalik load balancer.
+model AuthAttempt {
+  key         String    @id
+  failures    Int       @default(0)
+  windowStart DateTime  @default(now()) @map("window_start")
+  lockedUntil DateTime? @map("locked_until")
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@index([updatedAt])
+  @@map("auth_attempts")
 }

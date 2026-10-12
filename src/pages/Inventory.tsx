@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -12,6 +13,9 @@ import { Modal } from '../components/ui/Modal';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Tabs } from '../components/ui/Tabs';
 import { Icon } from '../components/icons/Icon';
+import { BarcodeScanner } from '../components/inventory/BarcodeScanner';
+import { PoOverviewTab } from '../components/inventory/PoOverviewTab';
+import { StockOpnameTab } from '../components/inventory/StockOpnameTab';
 import { Reveal } from '../components/Reveal';
 import { formatDate, formatIDR, formatNumber, timeAgo } from '../lib/format';
 import { categoryName, stockTotal, warehouseName } from '../lib/stats';
@@ -21,19 +25,13 @@ import { useModuleStore } from '../stores/moduleStore';
 import { toast } from '../stores/toastStore';
 import type { Product, StockMovement } from '../types';
 
-type TabKey = 'produk' | 'po';
+type TabKey = 'produk' | 'po' | 'opname';
 
 const tabOptions: Array<{ value: TabKey; label: string }> = [
   { value: 'produk', label: 'Daftar Produk' },
   { value: 'po', label: 'Purchase Order' },
+  { value: 'opname', label: 'Stok Opname' },
 ];
-
-const poBadge: Record<string, { variant: 'outline' | 'neutral' | 'ink'; icon?: 'clock' | 'check'; label: string }> = {
-  draft: { variant: 'outline', label: 'Draft' },
-  ordered: { variant: 'neutral', icon: 'clock', label: 'Dipesan' },
-  received: { variant: 'ink', icon: 'check', label: 'Diterima' },
-  cancelled: { variant: 'outline', label: 'Dibatalkan' },
-};
 
 const movementBadge: Record<StockMovement['type'], { variant: 'neutral' | 'ink' | 'outline'; label: string }> = {
   sale: { variant: 'neutral', label: 'Terjual' },
@@ -43,16 +41,13 @@ const movementBadge: Record<StockMovement['type'], { variant: 'neutral' | 'ink' 
 };
 
 const PROD_PAGE_SIZE = 8;
-const PO_PAGE_SIZE = 5;
 
 export default function Inventory() {
   const tenant = useBusinessStore((s) => s.tenant);
   const allProducts = useBusinessStore((s) => s.products);
   const allCategories = useBusinessStore((s) => s.categories);
   const allStocks = useBusinessStore((s) => s.stocks);
-  const allPurchaseOrders = useBusinessStore((s) => s.purchaseOrders);
   const allStockMovements = useBusinessStore((s) => s.stockMovements);
-  const allSuppliers = useBusinessStore((s) => s.suppliers);
   const allWarehouses = useBusinessStore((s) => s.warehouses);
 
   const products = useMemo(() => {
@@ -74,14 +69,6 @@ export default function Inventory() {
     return allStocks.filter((s) => tenantWhIds.has(s.warehouse_id) || productIds.has(s.product_id));
   }, [allStocks, tenantWhIds, productIds]);
 
-  const purchaseOrders = useMemo(() => {
-    return allPurchaseOrders.filter((po) => po.tenant_id === tenant.id || (!po.tenant_id && tenant.id === 'tenant-newsem'));
-  }, [allPurchaseOrders, tenant.id]);
-
-  const suppliers = useMemo(() => {
-    return allSuppliers.filter((s) => s.tenant_id === tenant.id || (!s.tenant_id && tenant.id === 'tenant-newsem'));
-  }, [allSuppliers, tenant.id]);
-
   const stockMovements = useMemo(() => {
     return allStockMovements.filter((m) => tenantWhIds.has(m.warehouse_id) || productIds.has(m.product_id));
   }, [allStockMovements, tenantWhIds, productIds]);
@@ -91,15 +78,17 @@ export default function Inventory() {
   const isAssistantActive = useModuleStore((s) => s.isActive('assistant'));
   const user = useAuthStore((s) => s.user);
   const canManageExcel = ['owner', 'manager', 'admin', 'superadmin'].includes(user?.role || 'owner');
+  // Staff gudang tidak punya izin purchasing:read, jadi tab PO disembunyikan.
+  const canManagePo = ['owner', 'manager', 'admin', 'superadmin'].includes(user?.role || '');
+  const visibleTabs = canManagePo ? tabOptions : tabOptions.filter((t) => t.value !== 'po');
 
   const [tab, setTab] = useState<TabKey>('produk');
   const [dismissed, setDismissed] = useState(false);
   const [query, setQuery] = useState('');
   const [catFilter, setCatFilter] = useState('semua');
   const [prodPage, setProdPage] = useState(1);
-  const [poQuery, setPoQuery] = useState('');
-  const [poPage, setPoPage] = useState(1);
   const [scanOpen, setScanOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [scanCode, setScanCode] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [selected, setSelected] = useState<Product | null>(null);
@@ -264,28 +253,22 @@ export default function Inventory() {
     return filtered.slice((prodPage - 1) * PROD_PAGE_SIZE, prodPage * PROD_PAGE_SIZE);
   }, [filtered, prodPage, stockMap]);
 
-  // Reaktif realtime: re-compute saat purchaseOrders berubah
-  const filteredPOs = useMemo(() => {
-    const q = poQuery.trim().toLowerCase();
-    if (!q) return purchaseOrders;
-    return purchaseOrders.filter((po) => {
-      const supplierName = suppliers.find((s) => s.id === po.supplier_id)?.name?.toLowerCase() ?? '';
-      const wName = warehouseName(po.warehouse_id).toLowerCase();
-      const code = `po-${po.id}`.toLowerCase();
-      return supplierName.includes(q) || wName.includes(q) || code.includes(q);
-    });
-  }, [purchaseOrders, suppliers, poQuery]);
+  // Pintasan dari Dashboard: /app/inventory?scan=1 langsung membuka pemindai
+  useEffect(() => {
+    if (searchParams.get('scan') === '1') {
+      setScanOpen(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
-  const totalPoPages = Math.max(1, Math.ceil(filteredPOs.length / PO_PAGE_SIZE));
-  const pagedPOs = useMemo(() => {
-    return filteredPOs.slice((poPage - 1) * PO_PAGE_SIZE, poPage * PO_PAGE_SIZE);
-  }, [filteredPOs, poPage]);
-
-  function findByScan() {
-    const code = scanCode.trim().toLowerCase();
-    const found = products.find((p) => p.barcode === scanCode.trim() || p.sku.toLowerCase() === code);
+  function findByScan(raw: string = scanCode) {
+    const trimmed = raw.trim();
+    const code = trimmed.toLowerCase();
+    const found = products.find((p) => p.barcode === trimmed || p.sku.toLowerCase() === code);
     if (found) {
       toast({ title: `Ditemukan: ${found.name}`, icon: 'check' });
+      setTab('produk');
+      setSelected(found);
     } else {
       toast({ title: 'Produk tidak ditemukan', icon: 'warning' });
     }
@@ -379,7 +362,7 @@ export default function Inventory() {
         </Reveal>
       )}
 
-      <Tabs options={tabOptions} value={tab} onChange={setTab} />
+      <Tabs options={visibleTabs} value={tab} onChange={setTab} />
 
       {tab === 'produk' && (
         <div className="space-y-4">
@@ -640,122 +623,14 @@ export default function Inventory() {
         </div>
       )}
 
-      {tab === 'po' && (
-        <div className="space-y-4">
-          <div className="relative">
-            <Icon
-              name="search"
-              size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-pebble"
-            />
-            <input
-              value={poQuery}
-              onChange={(e) => {
-                setPoQuery(e.target.value);
-                setPoPage(1);
-              }}
-              placeholder="Cari Purchase Order (supplier / gudang / kode)…"
-              className="w-full bg-paper border border-pebble/70 rounded-lg pl-9 pr-8 py-2.5 text-[15px] placeholder:text-pebble focus:border-ink focus:outline-none transition-colors"
-            />
-            {poQuery && (
-              <button
-                onClick={() => {
-                  setPoQuery('');
-                  setPoPage(1);
-                }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-fossil hover:text-ink text-body-sm"
-              >
-                ✕
-              </button>
-            )}
-          </div>
+      {tab === 'opname' && <StockOpnameTab />}
 
-          <Reveal className="space-y-3" key={`po-${poQuery}-${poPage}`}>
-            {filteredPOs.length === 0 ? (
-              <Card>
-                <EmptyState
-                  icon="search"
-                  title="Tidak ada Purchase Order ditemukan"
-                  body="Coba kata kunci pencarian lain."
-                />
-              </Card>
-            ) : (
-              <>
-                {pagedPOs.map((po) => {
-                  const total = po.items.reduce((s, i) => s + i.qty * i.price, 0);
-                  const badge = poBadge[po.status];
-                  const supplierName = suppliers.find((s) => s.id === po.supplier_id)?.name ?? '-';
-                  return (
-                    <Card key={po.id} className="p-4 sm:p-5 flex flex-wrap items-center gap-3 sm:gap-4">
-                      <div>
-                        <p className="text-[15px] text-ink font-medium">
-                          PO-{po.id.slice(3).toUpperCase().padStart(3, '0')}
-                        </p>
-                        <p className="text-caption text-fossil mt-0.5">
-                          {supplierName} → {warehouseName(po.warehouse_id)} · {formatDate(po.created_at)}
-                        </p>
-                      </div>
-                      <p className="text-caption text-fossil">
-                        {po.items.length} item · <span className="tnum font-medium text-ink">{formatIDR(total)}</span>
-                      </p>
-                      <div className="ml-auto flex items-center gap-2">
-                        <Badge variant={badge.variant} icon={badge.icon}>
-                          {badge.label}
-                        </Badge>
-                        {po.status === 'ordered' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              toast({
-                                title: 'Barang diterima (mock)',
-                                description: 'Stok gudang diperbarui.',
-                                icon: 'check',
-                              })
-                            }
-                          >
-                            Terima Barang
-                          </Button>
-                        )}
-                        {po.status === 'draft' && (
-                          <Button
-                            variant="subtle"
-                            size="sm"
-                            onClick={() =>
-                              toast({
-                                title: 'PO dikirim ke supplier (mock)',
-                                description: `${supplierName} akan menerima email pesanan.`,
-                                icon: 'mail',
-                              })
-                            }
-                          >
-                            Kirim ke Supplier
-                          </Button>
-                        )}
-                      </div>
-                    </Card>
-                  );
-                })}
-
-                <Pagination
-                  currentPage={poPage}
-                  totalPages={totalPoPages}
-                  totalItems={filteredPOs.length}
-                  pageSize={PO_PAGE_SIZE}
-                  onPageChange={setPoPage}
-                />
-              </>
-            )}
-          </Reveal>
-        </div>
-      )}
+      {tab === 'po' && <PoOverviewTab canManage={canManagePo} />}
 
       {/* Modal pindai barcode */}
       <Modal open={scanOpen} onClose={() => setScanOpen(false)} title="Pindai Barcode" maxWidth="md">
-        <div className="rounded-xl bg-bone border border-ash aspect-video flex flex-col items-center justify-center gap-3">
-          <Icon name="camera" size={32} className="text-pebble" />
-          <p className="text-caption text-fossil">Arahkan kamera ke barcode produk</p>
-        </div>
+        <BarcodeScanner onDetect={(code) => findByScan(code)} />
+        <p className="text-caption text-fossil mt-2">Arahkan kamera ke barcode produk.</p>
         <div className="flex items-center gap-3 my-4">
           <span className="flex-1 border-t border-ash" />
           <span className="text-caption text-pebble">atau</span>
@@ -766,9 +641,14 @@ export default function Inventory() {
             label="Ketik SKU / barcode"
             value={scanCode}
             onChange={(e) => setScanCode(e.target.value)}
+            onKeyDown={(e) => {
+              // Alat scan USB mengetik kode lalu menekan Enter
+              if (e.key === 'Enter') findByScan();
+            }}
+            inputMode="text"
             placeholder="mis. KOP-001 atau 8990001"
           />
-          <Button full onClick={findByScan}>
+          <Button full onClick={() => findByScan()}>
             Cari Produk
           </Button>
         </div>

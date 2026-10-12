@@ -26,14 +26,19 @@ export class UsersController {
 
   @Post()
   @RequirePermissions('users:manage')
-  create(@Tenant() tenantId: string, @Body() dto: CreateUserDto) {
-    return this.users.create(tenantId, dto);
+  create(@Tenant() tenantId: string, @CurrentUser() user: AuthUser, @Body() dto: CreateUserDto) {
+    return this.users.create(tenantId, dto, user);
   }
 
   @Patch(':id')
   @RequirePermissions('users:manage')
-  update(@Tenant() tenantId: string, @Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.users.update(tenantId, id, dto);
+  update(
+    @Tenant() tenantId: string,
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateUserDto,
+  ) {
+    return this.users.update(tenantId, id, dto, user);
   }
 
   @Delete(':id')

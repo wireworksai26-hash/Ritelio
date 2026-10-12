@@ -1,8 +1,9 @@
 import { forwardRef, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { cn } from '../../lib/format';
+import { Icon } from '../icons/Icon';
 
 const baseField =
-  'w-full bg-paper border border-pebble/70 rounded-lg px-3 py-2.5 text-[15px] text-ink placeholder:text-pebble transition-colors duration-150 hover:border-pebble focus:border-ink focus:outline-none';
+  'w-full bg-paper border border-pebble/70 rounded-lg px-3 py-2.5 text-[16px] sm:text-[15px] text-ink placeholder:text-pebble transition-colors duration-150 hover:border-pebble focus:border-ink focus:outline-none';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -33,9 +34,16 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
   const inputId = id ?? rest.name;
   return (
     <Field label={label} hint={hint} htmlFor={inputId}>
-      <select ref={ref} id={inputId} className={cn(baseField, 'appearance-none pr-9', className)} {...rest}>
-        {children}
-      </select>
+      <div className="relative">
+        <select ref={ref} id={inputId} className={cn(baseField, 'appearance-none pr-9', className)} {...rest}>
+          {children}
+        </select>
+        <Icon
+          name="chevron-down"
+          size={15}
+          className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-fossil"
+        />
+      </div>
     </Field>
   );
 });

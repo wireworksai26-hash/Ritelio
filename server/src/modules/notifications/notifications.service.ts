@@ -42,10 +42,15 @@ export class NotificationsService {
     return { count };
   }
 
-  async markRead(tenantId: string, id: string) {
-    const notif = await this.prisma.notification.findFirst({ where: { id, tenantId } });
-    if (!notif) throw new NotFoundException('Notifikasi tidak ditemukan.');
-    return this.prisma.notification.update({ where: { id }, data: { read: true } });
+  async markRead(tenantId: string, id: string, user: AuthUser) {
+    // Scope dengan userId: notifikasi yang ditujukan ke user lain (userId != null)
+    // tidak boleh bisa dibaca atau ditandai terbaca oleh user ini.
+    const result = await this.prisma.notification.updateMany({
+      where: { id, ...this.scope(tenantId, user.sub) },
+      data: { read: true },
+    });
+    if (result.count !== 1) throw new NotFoundException('Notifikasi tidak ditemukan.');
+    return { ok: true };
   }
 
   async markAllRead(tenantId: string, user: AuthUser) {

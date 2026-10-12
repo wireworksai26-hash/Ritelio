@@ -1,57 +1,25 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   Param,
   Patch,
   Post,
   Query,
 } from '@nestjs/common';
+import { ReceiveOrderDto } from './dto/purchasing.dto';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { Tenant } from '../../common/decorators/tenant.decorator';
-import type {
-  CreatePODto,
-  CreateSupplierDto,
-  OrderQueryDto,
-  UpdatePODto,
-  UpdateSupplierDto,
-} from './dto/purchasing.dto';
+// DTO harus value import: lihat catatan di inventory.controller.ts.
+import { CreatePODto, OrderQueryDto, UpdatePODto } from './dto/purchasing.dto';
 import { PurchasingService } from './purchasing.service';
 
 @Controller('purchasing')
 export class PurchasingController {
   constructor(private readonly purchasing: PurchasingService) {}
 
-  // ============================== PEMASOK ==============================
-
-  @Get('suppliers')
-  @RequirePermissions('purchasing:read')
-  listSuppliers(@Tenant() tenantId: string) {
-    return this.purchasing.listSuppliers(tenantId);
-  }
-
-  @Post('suppliers')
-  @RequirePermissions('purchasing:write')
-  createSupplier(@Tenant() tenantId: string, @Body() dto: CreateSupplierDto) {
-    return this.purchasing.createSupplier(tenantId, dto);
-  }
-
-  @Patch('suppliers/:id')
-  @RequirePermissions('purchasing:write')
-  updateSupplier(
-    @Tenant() tenantId: string,
-    @Param('id') id: string,
-    @Body() dto: UpdateSupplierDto,
-  ) {
-    return this.purchasing.updateSupplier(tenantId, id, dto);
-  }
-
-  @Delete('suppliers/:id')
-  @RequirePermissions('purchasing:write')
-  removeSupplier(@Tenant() tenantId: string, @Param('id') id: string) {
-    return this.purchasing.removeSupplier(tenantId, id);
-  }
+  // Route pemasok (/purchasing/suppliers) pindah ke PartyController (/parties/suppliers)
+  // supaya master supplier & customer punya satu service.
 
   // ============================== PURCHASE ORDER ==============================
 
@@ -79,9 +47,15 @@ export class PurchasingController {
     return this.purchasing.updateOrder(tenantId, id, dto);
   }
 
+  @Post('orders/:id/send')
+  @RequirePermissions('purchasing:write')
+  sendOrder(@Tenant() tenantId: string, @Param('id') id: string) {
+    return this.purchasing.sendOrder(tenantId, id);
+  }
+
   @Post('orders/:id/receive')
   @RequirePermissions('purchasing:write')
-  receiveOrder(@Tenant() tenantId: string, @Param('id') id: string) {
-    return this.purchasing.receiveOrder(tenantId, id);
+  receiveOrder(@Tenant() tenantId: string, @Param('id') id: string, @Body() dto: ReceiveOrderDto) {
+    return this.purchasing.receiveOrder(tenantId, id, dto?.rejections);
   }
 }

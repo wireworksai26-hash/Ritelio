@@ -2,16 +2,20 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: retalio-postgres
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: retalio
-      POSTGRES_PASSWORD: retalio
-      POSTGRES_DB: retalio
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER wajib diisi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD wajib diisi}
+      POSTGRES_DB: ${POSTGRES_DB:-retalio}
+    # Backend dev berjalan dari host, jadi publish hanya pada loopback.
+    # Database tidak terbuka ke interface jaringan lain.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - retalio-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U retalio -d retalio"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-retalio} -d ${POSTGRES_DB:-retalio}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -21,7 +25,7 @@ services:
   #   image: redis:7-alpine
   #   container_name: retalio-redis
   #   ports:
-  #     - "6379:6379"
+  #     - "127.0.0.1:6379:6379"
 
 volumes:
   retalio-pgdata:

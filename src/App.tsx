@@ -1,21 +1,54 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import AppShell from './components/layout/AppShell';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { InstallBanner } from './components/pwa/InstallBanner';
+import { Toasts } from './components/ui/Toast';
+import { toast } from './stores/toastStore';
 import { subscribeToStateChanges } from './lib/broadcast';
+import { rolesForPath } from './components/layout/nav';
 import Dashboard from './pages/Dashboard';
-import Finance from './pages/Finance';
-import Inventory from './pages/Inventory';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
-import Notifications from './pages/Notifications';
 import Onboarding from './pages/Onboarding';
-import POS from './pages/POS';
-import Settings from './pages/Settings';
-import Superadmin from './pages/Superadmin';
 import { homePathFor, useAuthStore } from './stores/authStore';
 import { useBusinessStore } from './stores/businessStore';
 import type { Role } from './types';
+
+// Halaman di dalam /app dimuat saat dibuka saja. Bundle awal PWA tetap kecil
+// walau modul ERP bertambah banyak — penting untuk HP dengan koneksi lemah.
+const Finance = lazy(() => import('./pages/Finance'));
+const Inventory = lazy(() => import('./pages/Inventory'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const POS = lazy(() => import('./pages/POS'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Superadmin = lazy(() => import('./pages/Superadmin'));
+const Crm = lazy(() => import('./pages/Crm'));
+const Hrm = lazy(() => import('./pages/Hrm'));
+const Manufacturing = lazy(() => import('./pages/Manufacturing'));
+const Operations = lazy(() => import('./pages/Operations'));
+const Accounting = lazy(() => import('./pages/Accounting'));
+const Billing = lazy(() => import('./pages/Billing'));
+const Banking = lazy(() => import('./pages/Banking'));
+const Assets = lazy(() => import('./pages/Assets'));
+const Procurement = lazy(() => import('./pages/Procurement'));
+const Approvals = lazy(() => import('./pages/Approvals'));
+const Audit = lazy(() => import('./pages/Audit'));
+const Iot = lazy(() => import('./pages/Iot'));
+
+function PageFallback() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label="Memuat halaman">
+      <div className="h-9 w-2/3 sm:w-1/3 rounded-lg bg-sand animate-pulse" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="h-[74px] rounded-xl bg-sand/70 animate-pulse" />
+        ))}
+      </div>
+      <div className="h-64 rounded-xl bg-sand/50 animate-pulse" />
+    </div>
+  );
+}
 
 // Redirect default landing page sesuai tugas & wewenang masing-masing role
 function Home() {
@@ -43,8 +76,45 @@ function RequireRole({ roles, children }: { roles: Role[]; children: JSX.Element
   return children;
 }
 
+// Guard rute + batas Suspense per halaman, role diambil dari konfigurasi menu.
+function Guarded({ path, children }: { path: string; children: JSX.Element }) {
+  return (
+    <RequireRole roles={rolesForPath(path)}>
+      {/* key=path: pindah halaman selalu mereset boundary; galat satu halaman tidak menjatuhkan shell/menu */}
+      <ErrorBoundary key={path} scope="page" name={path}>
+        <Suspense fallback={<PageFallback />}>{children}</Suspense>
+      </ErrorBoundary>
+    </RequireRole>
+  );
+}
+
+// Penolakan promise yang tidak ditangani (mis. aksi async tanpa try/catch) jangan diam.
+function describeRejection(reason: unknown): string {
+  const message = reason instanceof Error ? reason.message : typeof reason === 'string' ? reason : '';
+  if (!message) return 'Coba ulangi aksi tersebut.';
+  if (/failed to fetch|networkerror|load failed/i.test(message)) return 'Tidak dapat terhubung ke server. Periksa koneksi internet.';
+  if (/abort/i.test(message)) return 'Permintaan terlalu lama dan dibatalkan. Coba lagi.';
+  return message.length > 140 ? `${message.slice(0, 137)}...` : message;
+}
+
+function useUnhandledRejectionToast() {
+  useEffect(() => {
+    let lastAt = 0;
+    const onRejection = (event: PromiseRejectionEvent) => {
+      console.error('[unhandledrejection]', event.reason);
+      const now = Date.now();
+      if (now - lastAt < 3000) return; // jangan membanjiri layar
+      lastAt = now;
+      toast({ title: 'Terjadi kesalahan', description: describeRejection(event.reason), icon: 'warning' });
+    };
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => window.removeEventListener('unhandledrejection', onRejection);
+  }, []);
+}
+
 export default function App() {
   const user = useAuthStore((s) => s.user);
+  useUnhandledRejectionToast();
 
   useEffect(() => {
     // Sinkronkan data bisnis secara instan antar-tab / multi-jendela / multi-role
@@ -87,51 +157,29 @@ export default function App() {
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/app" element={<RequireAuth>{<AppShell />}</RequireAuth>}>
           <Route index element={<Home />} />
-          <Route
-            path="superadmin"
-            element={
-              <RequireRole roles={['superadmin']}>
-                <Superadmin />
-              </RequireRole>
-            }
-          />
-          <Route
-            path="pos"
-            element={
-              <RequireRole roles={['superadmin', 'manager', 'cashier']}>
-                <POS />
-              </RequireRole>
-            }
-          />
-          <Route
-            path="inventory"
-            element={
-              <RequireRole roles={['superadmin', 'owner', 'manager', 'staff']}>
-                <Inventory />
-              </RequireRole>
-            }
-          />
-          <Route
-            path="finance"
-            element={
-              <RequireRole roles={['superadmin', 'owner']}>
-                <Finance />
-              </RequireRole>
-            }
-          />
-          <Route
-            path="settings"
-            element={
-              <RequireRole roles={['superadmin', 'owner']}>
-                <Settings />
-              </RequireRole>
-            }
-          />
-          <Route path="notifications" element={<Notifications />} />
+          <Route path="superadmin" element={<Guarded path="/app/superadmin"><Superadmin /></Guarded>} />
+          <Route path="pos" element={<Guarded path="/app/pos"><POS /></Guarded>} />
+          <Route path="inventory" element={<Guarded path="/app/inventory"><Inventory /></Guarded>} />
+          <Route path="finance" element={<Guarded path="/app/finance"><Finance /></Guarded>} />
+          <Route path="settings" element={<Guarded path="/app/settings"><Settings /></Guarded>} />
+          <Route path="crm" element={<Guarded path="/app/crm"><Crm /></Guarded>} />
+          <Route path="procurement" element={<Guarded path="/app/procurement"><Procurement /></Guarded>} />
+          <Route path="manufacturing" element={<Guarded path="/app/manufacturing"><Manufacturing /></Guarded>} />
+          <Route path="accounting" element={<Guarded path="/app/accounting"><Accounting /></Guarded>} />
+          <Route path="billing" element={<Guarded path="/app/billing"><Billing /></Guarded>} />
+          <Route path="banking" element={<Guarded path="/app/banking"><Banking /></Guarded>} />
+          <Route path="assets" element={<Guarded path="/app/assets"><Assets /></Guarded>} />
+          <Route path="approvals" element={<Guarded path="/app/approvals"><Approvals /></Guarded>} />
+          <Route path="hrm" element={<Guarded path="/app/hrm"><Hrm /></Guarded>} />
+          <Route path="operations" element={<Guarded path="/app/operations"><Operations /></Guarded>} />
+          <Route path="iot" element={<Guarded path="/app/iot"><Iot /></Guarded>} />
+          <Route path="audit" element={<Guarded path="/app/audit"><Audit /></Guarded>} />
+          <Route path="notifications" element={<Guarded path="/app/notifications"><Notifications /></Guarded>} />
         </Route>
         <Route path="*" element={<Navigate to={user ? homePathFor(user.role) : '/'} replace />} />
       </Routes>
       <InstallBanner />
+      <Toasts />
     </>
   );
 }

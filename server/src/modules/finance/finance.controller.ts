@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -11,6 +13,12 @@ import type { Response } from 'express';
 import { CurrentUser, type AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { Tenant } from '../../common/decorators/tenant.decorator';
+import { AccountsService } from './accounts.service';
+import {
+  CreateAccountDto,
+  ReorderAccountDto,
+  UpdateAccountDto,
+} from './dto/account.dto';
 import {
   CashflowQueryDto,
   CreateEntryDto,
@@ -23,20 +31,23 @@ import { FinanceService } from './finance.service';
 
 @Controller('finance')
 export class FinanceController {
-  constructor(private readonly finance: FinanceService) {}
+  constructor(
+    private readonly finance: FinanceService,
+    private readonly accountsService: AccountsService,
+  ) {}
 
   // Laporan laba rugi ringkas N hari terakhir
   @Get('profit-loss')
   @RequirePermissions('finance:read')
   profitLoss(@Tenant() tenantId: string, @Query() query: ProfitLossQueryDto) {
-    return this.finance.profitLoss(tenantId, query.days ?? 30);
+    return this.finance.profitLoss(tenantId, query.days ?? 30, query.currency);
   }
 
   // Arus kas aktual + prakiraan sederhana
   @Get('cashflow')
   @RequirePermissions('finance:read')
   cashflow(@Tenant() tenantId: string, @Query() query: CashflowQueryDto) {
-    return this.finance.cashflow(tenantId, query.days ?? 14, query.forecast ?? 30);
+    return this.finance.cashflow(tenantId, query.days ?? 14, query.forecast ?? 30, query.currency);
   }
 
   // Daftar jurnal (bisa difilter hanya anomali)
@@ -69,7 +80,46 @@ export class FinanceController {
   @Get('accounts')
   @RequirePermissions('finance:read')
   accounts(@Tenant() tenantId: string) {
-    return this.finance.accounts(tenantId);
+    return this.accountsService.list(tenantId);
+  }
+
+  // Pohon akun untuk tampilan tree di pengaturan
+  @Get('accounts/tree')
+  @RequirePermissions('finance:read')
+  accountTree(@Tenant() tenantId: string) {
+    return this.accountsService.tree(tenantId);
+  }
+
+  // Tambah akun baru
+  @Post('accounts')
+  @RequirePermissions('finance:write')
+  createAccount(@Tenant() tenantId: string, @Body() dto: CreateAccountDto) {
+    return this.accountsService.create(tenantId, dto);
+  }
+
+  // Ubah akun (nama/tipe/induk)
+  @Patch('accounts/:id')
+  @RequirePermissions('finance:write')
+  updateAccount(
+    @Tenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateAccountDto,
+  ) {
+    return this.accountsService.update(tenantId, id, dto);
+  }
+
+  // Hapus akun yang belum dipakai jurnal
+  @Delete('accounts/:id')
+  @RequirePermissions('finance:write')
+  removeAccount(@Tenant() tenantId: string, @Param('id') id: string) {
+    return this.accountsService.remove(tenantId, id);
+  }
+
+  // Ubah kode akun (reorder)
+  @Post('accounts/reorder')
+  @RequirePermissions('finance:write')
+  reorderAccounts(@Tenant() tenantId: string, @Body() dto: ReorderAccountDto) {
+    return this.accountsService.reorder(tenantId, dto);
   }
 
   // Ekspor jurnal ke CSV (PDF/Excel menyusul)

@@ -1,4 +1,5 @@
 // Klien API Retalio — terhubung langsung ke Backend NestJS API & PostgreSQL
+import { selectedCompanyId } from '../stores/companyStore';
 
 const RAW_BASE =
   (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ||
@@ -42,12 +43,15 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, timeo
   try {
     const url = getCleanApiUrl(path);
     const token = getToken();
+    const companyId = selectedCompanyId();
     const res = await fetch(url, {
       ...options,
       signal: controller.signal,
       headers: {
         'content-type': 'application/json',
         ...(token ? { authorization: `Bearer ${token}` } : {}),
+        // Perusahaan aktif; tanpa header backend memakai perusahaan utama
+        ...(companyId ? { 'x-company-id': companyId } : {}),
         ...(options.headers ?? {}),
       },
     });

@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { CurrentUser, type AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { Tenant } from '../../common/decorators/tenant.decorator';
-import { BatchTransactionDto, CreateTransactionDto } from './dto/transaction.dto';
+import { BatchTransactionDto, CreateTransactionDto, SalesQueryDto } from './dto/transaction.dto';
 import { SalesService } from './sales.service';
 
 @Controller('sales')
@@ -25,16 +25,8 @@ export class SalesController {
 
   @Get('transactions')
   @RequirePermissions('pos:read')
-  list(
-    @Tenant() tenantId: string,
-    @Query('outletId') outletId?: string,
-    @Query('syncStatus') syncStatus?: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
-  ) {
-    return this.sales.list(tenantId, { outletId, syncStatus, from, to, page, limit });
+  list(@Tenant() tenantId: string, @Query() query: SalesQueryDto) {
+    return this.sales.list(tenantId, query);
   }
 
   @Get('transactions/:id')

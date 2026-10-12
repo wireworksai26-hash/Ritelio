@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { gsap, ScrollTrigger } from '../../lib/gsap';
-import { pendingSyncCount } from '../../lib/stats';
 import { useAssistantStore } from '../../stores/assistantStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useBusinessStore } from '../../stores/businessStore';
@@ -13,12 +12,13 @@ import { useThemeStore } from '../../stores/themeStore';
 import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
 import { Icon } from '../icons/Icon';
+import { ActiveCompanyPicker } from '../company/ActiveCompanyPicker';
 import { LogoMark } from './Logo';
 
 function SyncChip() {
   const isOnline = useSyncStore((s) => s.isOnline);
   const pendingLocal = useSyncStore((s) => s.pendingLocal);
-  const pending = pendingSyncCount() + pendingLocal.length;
+  const pending = pendingLocal.length;
 
   if (!isOnline) {
     return (
@@ -149,6 +149,8 @@ export function Topbar() {
             />
           </div>
         )}
+
+        {(user.role === 'owner' || user.role === 'admin') && <ActiveCompanyPicker />}
 
         <div className="flex-1 min-w-0" />
 

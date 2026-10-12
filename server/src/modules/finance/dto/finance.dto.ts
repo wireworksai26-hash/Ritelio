@@ -1,4 +1,6 @@
+import { Type } from 'class-transformer';
 import {
+  Matches,
   IsBoolean,
   IsIn,
   IsInt,
@@ -14,25 +16,38 @@ import {
 // Query untuk laporan laba rugi
 export class ProfitLossQueryDto {
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(365)
   days?: number;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Z]{3}$/, { message: 'Kode mata uang harus 3 huruf kapital, misal IDR.' })
+  currency?: string;
 }
 
 // Query untuk arus kas + prakiraan sederhana
 export class CashflowQueryDto {
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(90)
   days?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(90)
   forecast?: number;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Z]{3}$/, { message: 'Kode mata uang harus 3 huruf kapital, misal IDR.' })
+  currency?: string;
 }
 
 // Query daftar jurnal; anomaly datang sebagai string 'true'/'false' dari query string
@@ -42,11 +57,13 @@ export class EntriesQueryDto {
   anomaly?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   page?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(100)
@@ -61,8 +78,10 @@ export class CreateEntryDto {
   @IsString()
   creditAccountCode!: string;
 
-  @IsNumber()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
+  @Max(999_999_999_999.99)
   amount!: number;
 
   @IsOptional()
@@ -84,10 +103,11 @@ export class ResolveAnomalyDto {
 // Query ekspor laporan
 export class ExportQueryDto {
   @IsOptional()
-  @IsString()
-  format?: string;
+  @IsIn(['csv'])
+  format?: 'csv';
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(365)

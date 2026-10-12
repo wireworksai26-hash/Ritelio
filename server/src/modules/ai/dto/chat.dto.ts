@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 
 export class ChatDto {
@@ -14,6 +15,7 @@ export class FeedbackDto {
 
 export class CashflowForecastQuery {
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(7)
   @Max(90)

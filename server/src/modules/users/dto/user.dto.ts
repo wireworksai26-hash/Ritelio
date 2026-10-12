@@ -6,8 +6,10 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  MaxLength,
   MinLength,
 } from 'class-validator';
+import { ALL_PERMISSIONS } from '../../../common/rbac/permissions';
 
 export type UserRole = 'owner' | 'admin' | 'manager' | 'cashier' | 'staff';
 
@@ -16,6 +18,7 @@ const ROLES: UserRole[] = ['owner', 'admin', 'manager', 'cashier', 'staff'];
 export class CreateUserDto {
   @IsString()
   @MinLength(2)
+  @MaxLength(120)
   name!: string;
 
   @IsEmail()
@@ -25,6 +28,7 @@ export class CreateUserDto {
   role!: UserRole;
 
   // Override izin granular per user (JSONB), contoh: {"finance:read": true}
+  // Key divalidasi lagi di service (sanitizePermissionOverrides).
   @IsOptional()
   @IsObject()
   permissions?: Record<string, boolean>;
@@ -39,6 +43,7 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   @MinLength(2)
+  @MaxLength(120)
   name?: string;
 
   @IsOptional()
@@ -59,3 +64,5 @@ export class UpdateUserDto {
   @IsString({ each: true })
   outletIds?: string[];
 }
+
+export const VALID_PERMISSION_KEYS = ALL_PERMISSIONS;

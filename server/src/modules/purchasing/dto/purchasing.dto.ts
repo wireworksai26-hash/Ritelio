@@ -1,18 +1,25 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Length,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
+
+// Batas atas sesuai kolom database (Decimal(14,2) / Decimal(14,3)).
+const MAX_MONEY = 999_999_999_999.99;
+const MAX_QTY = 999_999_999.999;
 
 export class CreateSupplierDto {
   @IsString()
@@ -57,22 +64,30 @@ export class OrderQueryDto {
 
 export class POItemDto {
   @IsString()
+  @MaxLength(64)
   productId!: string;
 
-  @IsNumber()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01, { message: 'Jumlah item minimal 0,01.' })
+  @Max(MAX_QTY)
   qty!: number;
 
-  @IsNumber()
-  @Min(0, { message: 'Harga item tidak boleh negatif.' })
+  // Harga 0 ditolak: baris PO zeroes membuat jurnal penerimaan bernilai 0.
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01, { message: 'Harga item minimal 0,01.' })
+  @Max(MAX_MONEY)
   price!: number;
 }
 
 export class CreatePODto {
   @IsString()
+  @MaxLength(64)
   supplierId!: string;
 
   @IsString()
+  @MaxLength(64)
   warehouseId!: string;
 
   // Status awal PO: default draft, boleh langsung ordered
@@ -82,6 +97,7 @@ export class CreatePODto {
 
   @IsArray()
   @ArrayMinSize(1, { message: 'PO wajib memiliki minimal satu item.' })
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => POItemDto)
   items!: POItemDto[];
@@ -95,7 +111,18 @@ export class UpdatePODto {
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1, { message: 'PO wajib memiliki minimal satu item.' })
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => POItemDto)
   items?: POItemDto[];
+}
+
+/**
+ * Penerimaan barang. `rejections` memetakan id baris PO ke jumlah yang
+ * ditolak; dipakai untuk skor kualitas vendor dan mengurangi tagihan.
+ */
+export class ReceiveOrderDto {
+  @IsOptional()
+  @IsObject({ message: 'rejections harus berupa objek {idBaris: jumlah}.' })
+  rejections?: Record<string, number>;
 }

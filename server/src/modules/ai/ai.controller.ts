@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser, type AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { Tenant } from '../../common/decorators/tenant.decorator';
@@ -13,6 +14,9 @@ export class AiController {
   // Chat AI Assistant — router fast path (nol token) / slow path (NVIDIA NIM)
   @HttpCode(200)
   @Post('chat')
+  // Panggilan LLM mahal (sampai 20 detik + biaya token): batasi terpisah dari
+  // batas global agar user normal tetap bisa bertanya tanpa exhausting kuota.
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   chat(@CurrentUser() user: AuthUser, @Body() dto: ChatDto) {
     return this.ai.chat(user, dto.question);
   }
@@ -36,11 +40,5 @@ export class AiController {
   @Get('forecast/cashflow')
   cashflowForecast(@Tenant() tenantId: string, @Query() query: CashflowForecastQuery) {
     return this.ai.cashflowForecast(tenantId, query.days ?? 30);
-  }
-
-  // Smart Receipt OCR — butuh vision model
-  @Post('ocr')
-  ocr() {
-    return this.ai.ocr();
   }
 }

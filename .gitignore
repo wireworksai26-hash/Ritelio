@@ -12,8 +12,9 @@ dist-ssr
 .DS_Store
 
 # Environment variables (never commit these)
-.env*
-# NOTE: .env.example is committed for reference
+.env
+.env.*
+!.env.example
 
 # Meteor
 .meteor/

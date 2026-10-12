@@ -8,9 +8,14 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { CurrentUser, type AuthUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { Tenant } from '../../common/decorators/tenant.decorator';
-import type {
+// PENTING: DTO di-import sebagai nilai (bukan `import type`).
+// Nest membaca `design:paramtypes` dari decorator untuk menentukan kelas DTO
+// pada @Body/@Query. `import type` membuat metadata itu hilang, sehingga
+// ValidationPipe melewati request tanpa validasi apa pun.
+import {
   AdjustStockDto,
   CreateCategoryDto,
   CreateProductDto,
@@ -19,15 +24,26 @@ import type {
   ProductLookupQueryDto,
   ProductQueryDto,
   StockQueryDto,
+  ListWarehouseQueryDto,
   UpdateCategoryDto,
   UpdateProductDto,
   UpdateWarehouseDto,
 } from './dto/inventory.dto';
+import {
+  CloseStockOpDto,
+  CountStockOpLinesDto,
+  CreateStockOpDto,
+  ListStockOpQueryDto,
+} from './dto/stock-op.dto';
 import { InventoryService } from './inventory.service';
+import { StockOpService } from './stock-op.service';
 
 @Controller('inventory')
 export class InventoryController {
-  constructor(private readonly inventory: InventoryService) {}
+  constructor(
+    private readonly inventory: InventoryService,
+    private readonly stockOps: StockOpService,
+  ) {}
 
   // ============================== PRODUK ==============================
 
@@ -39,8 +55,8 @@ export class InventoryController {
 
   @Post('products')
   @RequirePermissions('inventory:write')
-  createProduct(@Tenant() tenantId: string, @Body() dto: CreateProductDto) {
-    return this.inventory.createProduct(tenantId, dto);
+  createProduct(@Tenant() tenantId: string, @CurrentUser() user: AuthUser, @Body() dto: CreateProductDto) {
+    return this.inventory.createProduct(tenantId, dto, user.sub);
   }
 
   // PENTING: route statis 'products/lookup' harus sebelum 'products/:id'
@@ -106,8 +122,8 @@ export class InventoryController {
 
   @Get('warehouses')
   @RequirePermissions('inventory:read')
-  listWarehouses(@Tenant() tenantId: string) {
-    return this.inventory.listWarehouses(tenantId);
+  listWarehouses(@Tenant() tenantId: string, @Query() query: ListWarehouseQueryDto) {
+    return this.inventory.listWarehouses(tenantId, query.isActive);
   }
 
   @Post('warehouses')
@@ -143,8 +159,49 @@ export class InventoryController {
 
   @Post('stock/adjust')
   @RequirePermissions('inventory:write')
-  adjustStock(@Tenant() tenantId: string, @Body() dto: AdjustStockDto) {
-    return this.inventory.adjustStock(tenantId, dto);
+  adjustStock(@Tenant() tenantId: string, @CurrentUser() user: AuthUser, @Body() dto: AdjustStockDto) {
+    return this.inventory.adjustStock(tenantId, dto, user.sub);
+  }
+
+  // ============================== STOCK OP (opening/closing) ==============================
+
+  @Get('stock-ops')
+  @RequirePermissions('inventory:read')
+  listStockOps(@Tenant() tenantId: string, @Query() query: ListStockOpQueryDto) {
+    return this.stockOps.list(tenantId, query);
+  }
+
+  @Post('stock-ops')
+  @RequirePermissions('inventory:write')
+  openStockOp(@Tenant() tenantId: string, @Body() dto: CreateStockOpDto) {
+    return this.stockOps.open(tenantId, dto);
+  }
+
+  @Get('stock-ops/:id')
+  @RequirePermissions('inventory:read')
+  getStockOp(@Tenant() tenantId: string, @Param('id') id: string) {
+    return this.stockOps.get(tenantId, id);
+  }
+
+  @Post('stock-ops/:id/count')
+  @RequirePermissions('inventory:write')
+  countStockOp(
+    @Tenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: CountStockOpLinesDto,
+  ) {
+    return this.stockOps.countLines(tenantId, id, dto.lines);
+  }
+
+  @Post('stock-ops/:id/close')
+  @RequirePermissions('inventory:write')
+  closeStockOp(
+    @Tenant() tenantId: string,
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: CloseStockOpDto,
+  ) {
+    return this.stockOps.close(tenantId, id, dto, user.sub);
   }
 
   // ============================== PERGERAKAN STOK ==============================

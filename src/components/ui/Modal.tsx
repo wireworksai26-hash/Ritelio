@@ -32,17 +32,19 @@ export function Modal({ open, onClose, title, children, maxWidth = 'lg' }: Modal
       <div
         className={cn(
           'relative w-full bg-paper border border-ash rounded-t-2xl sm:rounded-2xl',
-          'max-h-[88vh] overflow-y-auto p-6',
+          'max-h-[90dvh] overflow-y-auto overscroll-contain px-4 pt-3 sm:p-6',
           maxWidths[maxWidth],
         )}
+        style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom, 0px))' }}
       >
+        <div className="sm:hidden mx-auto mb-3 h-1 w-10 rounded-full bg-ash" aria-hidden="true" />
         {(title || true) && (
           <div className="flex items-start justify-between gap-4 mb-4">
             {title ? <h3 className="text-heading-sm font-light text-ink">{title}</h3> : <span />}
             <button
               onClick={onClose}
               aria-label="Tutup"
-              className="text-fossil hover:text-ink transition-colors p-1 -m-1"
+              className="text-fossil hover:text-ink transition-colors p-2 -m-2"
             >
               <Icon name="close" size={20} />
             </button>

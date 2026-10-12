@@ -66,7 +66,20 @@ export type IconName =
   | 'moon'
   | 'copy'
   | 'sparkles'
-  | 'dots';
+  | 'dots'
+  | 'target'
+  | 'funnel'
+  | 'handshake'
+  | 'factory'
+  | 'truck'
+  | 'wrench'
+  | 'shield'
+  | 'gauge'
+  | 'flow'
+  | 'sensor'
+  | 'clipboard'
+  | 'route'
+  | 'megaphone';
 
 const paths: Record<IconName, ReactElement> = {
   dashboard: (
@@ -365,6 +378,86 @@ const paths: Record<IconName, ReactElement> = {
     <>
       <path d="M12 3v3M12 18v3M3 12h3M18 12h3M6.34 6.34l2.12 2.12M15.54 15.54l2.12 2.12M6.34 17.66l2.12-2.12M15.54 8.46l2.12-2.12" />
       <circle cx="12" cy="12" r="2" />
+    </>
+  ),
+  target: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" />
+    </>
+  ),
+  funnel: <path d="M3.5 4.5h17l-6.6 7.8V20l-3.8-2.2v-5.5L3.5 4.5z" />,
+  handshake: (
+    <>
+      <path d="M8.5 12.5l2.2 2.2a1.6 1.6 0 002.3 0l.6-.6" />
+      <path d="M13.6 14.1l1.7 1.7a1.6 1.6 0 002.3 0l2.9-2.9" />
+      <path d="M3 10.5l3.5-3.5h4l2 1.6-3 3-1.8-1.8H3z" />
+      <path d="M21 10.5L17.5 7h-3.2" />
+    </>
+  ),
+  factory: (
+    <>
+      <path d="M3 20.5V10l5.5 3.5V10L14 13.5V7l7 4v9.5H3z" />
+      <path d="M7 20.5v-3.2M12 20.5v-3.2M17 20.5v-3.2" />
+    </>
+  ),
+  truck: (
+    <>
+      <path d="M2.5 6.5h11v10h-11z" />
+      <path d="M13.5 10h3.8l3.2 3v3.5h-7" />
+      <circle cx="7" cy="18.5" r="1.9" />
+      <circle cx="17" cy="18.5" r="1.9" />
+    </>
+  ),
+  wrench: (
+    <path d="M15.6 3.4a5.2 5.2 0 00-4.3 7.9L3.6 19a2 2 0 002.8 2.8l7.7-7.7a5.2 5.2 0 007.9-4.3l-3.1 3.1-3-.8-.8-3 3.1-3.1z" />
+  ),
+  shield: (
+    <>
+      <path d="M12 2.8l7.5 3v6.1c0 4.3-3 8.1-7.5 9.3-4.5-1.2-7.5-5-7.5-9.3V5.8l7.5-3z" />
+      <path d="M9.2 12.2l2 2 3.6-3.9" />
+    </>
+  ),
+  gauge: (
+    <>
+      <path d="M3.5 17.5a9 9 0 1117 0" />
+      <path d="M12 17.5l3.8-5.1" />
+      <circle cx="12" cy="17.5" r="1.3" />
+    </>
+  ),
+  flow: (
+    <>
+      <rect x="2.5" y="3" width="6.5" height="5.5" rx="1.2" />
+      <rect x="15" y="15.5" width="6.5" height="5.5" rx="1.2" />
+      <path d="M9 5.8h5.5a2 2 0 012 2v7.7" />
+    </>
+  ),
+  sensor: (
+    <>
+      <circle cx="12" cy="12" r="2.2" />
+      <path d="M8.2 8.2a5.4 5.4 0 000 7.6M15.8 8.2a5.4 5.4 0 010 7.6" />
+      <path d="M5.4 5.4a9.4 9.4 0 000 13.2M18.6 5.4a9.4 9.4 0 010 13.2" />
+    </>
+  ),
+  clipboard: (
+    <>
+      <path d="M9 3.5H7a2 2 0 00-2 2v13a2 2 0 002 2h10a2 2 0 002-2v-13a2 2 0 00-2-2h-2" />
+      <rect x="9" y="1.8" width="6" height="3.6" rx="1.1" />
+      <path d="M8.6 11h6.8M8.6 15h4.4" />
+    </>
+  ),
+  route: (
+    <>
+      <circle cx="5.5" cy="5.5" r="2.5" />
+      <circle cx="18.5" cy="18.5" r="2.5" />
+      <path d="M8 5.5h6.5a3.5 3.5 0 010 7H9a3.5 3.5 0 000 7h7" />
+    </>
+  ),
+  megaphone: (
+    <>
+      <path d="M4 9.5v4a1.5 1.5 0 001.5 1.5H8l7 4.5V5.5L8 10H5.5A1.5 1.5 0 004 11.5z" />
+      <path d="M18 9.2a3.6 3.6 0 010 5.6" />
     </>
   ),
 };

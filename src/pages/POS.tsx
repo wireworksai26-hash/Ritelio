@@ -9,6 +9,7 @@ import { Modal } from '../components/ui/Modal';
 import { Icon } from '../components/icons/Icon';
 import { Reveal } from '../components/Reveal';
 import { cn, formatDateTime, formatIDR, uid } from '../lib/format';
+import { ReceiptPrintSheet, type ReceiptData } from '../components/pos/ReceiptPrint';
 import { categoryName, productName, stockTotal } from '../lib/stats';
 import { useAuthStore } from '../stores/authStore';
 import { useBusinessStore } from '../stores/businessStore';
@@ -31,6 +32,7 @@ export default function POS() {
   const [catFilter, setCatFilter] = useState('semua');
   const [page, setPage] = useState(1);
   const [lastTx, setLastTx] = useState<SalesTransaction | null>(null);
+  const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
 
   const allProducts = useBusinessStore((s) => s.products);
@@ -131,6 +133,8 @@ export default function POS() {
   const lastCustomer = lastTx?.customer_id
     ? customers.find((c) => c.id === lastTx.customer_id)
     : null;
+  const outletName = (id: string): string =>
+    useBusinessStore.getState().outlets.find((o) => o.id === id)?.name ?? 'Outlet';
 
   // Isi keranjang — dipakai ulang: panel desktop (Card) & bottom sheet mobile (Modal)
   const cartBody = (
@@ -424,7 +428,9 @@ export default function POS() {
         {lastTx && (
           <div>
             <div className="rounded-xl bg-bone border border-ash p-5">
-              <p className="text-center text-[15px] text-ink">Kopi Kelana — Outlet Kemang</p>
+              <p className="text-center text-[15px] text-ink">
+                {tenant.name} — {outletName(lastTx.outlet_id)}
+              </p>
               <p className="text-caption text-fossil text-center mt-1">
                 {formatDateTime(lastTx.client_timestamp)}
               </p>
@@ -465,7 +471,18 @@ export default function POS() {
                 variant="ghost"
                 full
                 icon="printer"
-                onClick={() => toast({ title: 'Struk dikirim ke printer (mock)', icon: 'printer' })}
+                onClick={() =>
+                  setReceipt({
+                    businessName: tenant.name,
+                    outletName: outletName(lastTx.outlet_id),
+                    timestamp: lastTx.client_timestamp,
+                    items: lastTx.items.map((i) => ({ name: productName(i.product_id), qty: i.qty, price: i.price })),
+                    total: lastTx.total,
+                    paymentLabel,
+                    customerName: lastCustomer?.name,
+                    reference: lastTx.client_generated_id || lastTx.id,
+                  })
+                }
               >
                 Cetak Struk
               </Button>
@@ -483,6 +500,8 @@ export default function POS() {
           </div>
         )}
       </Modal>
+
+      <ReceiptPrintSheet data={receipt} onDone={() => setReceipt(null)} />
     </div>
   );
 }

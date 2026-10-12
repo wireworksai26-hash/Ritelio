@@ -35,6 +35,8 @@ export class AiService {
       where: { tenantId, status: { in: ['active', 'trialing'] } },
       orderBy: { startedAt: 'desc' },
     });
+    // Trial yang sudah lewat tanggalnya tidak lagi memberi kuota.
+    if (sub && sub.endsAt && sub.endsAt.getTime() < Date.now()) return 0;
     if (sub) return sub.aiQuota;
     return tenant.subscriptionPlan === 'plus_ai' ? 1000 : 0;
   }
@@ -52,6 +54,46 @@ export class AiService {
       update: { count: { increment: 1 } },
       create: { tenantId, month: this.monthKey(), count: 1 },
     });
+  }
+
+  /**
+   * Reserve satu slot kuota secara atomik: hanya satu request yang bisa menaikkan
+   * count dari (quota-1) ke quota. Mengembalikan false berarti kuota habis.
+   * Row counter yang belum ada dibuat dengan nilai 0 lalu di-poll — bounded agar
+   * Request tidak macet bila ada race saat row baru dibuat.
+   */
+  private async reserveUsage(tenantId: string, quota: number): Promise<boolean> {
+    if (quota === Number.POSITIVE_INFINITY) {
+      await this.incrementUsage(tenantId);
+      return true;
+    }
+    const month = this.monthKey();
+    // Row counter dibuat lebih dulu agar updateMany berikutnya punya target.
+    await this.prisma.aiUsageCounter
+      .upsert({
+        where: { tenantId_month: { tenantId, month } },
+        update: {},
+        create: { tenantId, month, count: 0 },
+      })
+      .catch(() => undefined);
+
+    // Filter count: { lt: quota } membuat increment bersifat atomik: hanya satu
+    // request yang bisa menaikkan count dari quota-1 ke quota.
+    const updated = await this.prisma.aiUsageCounter.updateMany({
+      where: { tenantId, month, count: { lt: quota } },
+      data: { count: { increment: 1 } },
+    });
+    return updated.count === 1;
+  }
+
+  /** Kembalikan slot yang direservasi ketika panggilan LLM gagal. */
+  private async releaseUsage(tenantId: string): Promise<void> {
+    await this.prisma.aiUsageCounter
+      .updateMany({
+        where: { tenantId, month: this.monthKey(), count: { gt: 0 } },
+        data: { count: { decrement: 1 } },
+      })
+      .catch(() => undefined);
   }
 
   private async log(
@@ -99,9 +141,12 @@ export class AiService {
       return { answer: result.answer, path: 'fast', intent: route.intent, basedOnRefs: result.refs };
     }
 
-    // SLOW PATH (NVIDIA NIM) — hanya jalur ini yang mengonsumsi kuota
-    const used = await this.usage(user.tenantId);
-    if (used >= quota) {
+    // SLOW PATH (NVIDIA NIM) — hanya jalur ini yang mengonsumsi kuota.
+    // Kuota direservasi ATOMIK sebelum panggilan LLM; kalau hanya dibaca lalu
+    // ditulis setelahnya, N request paralel semuanya lolos despite kuota habis.
+    const reserved = await this.reserveUsage(user.tenantId, quota);
+    if (!reserved) {
+      const used = await this.usage(user.tenantId);
       const answer =
         `Kuota AI bulan ini sudah habis (${used}/${quota} query). ` +
         'Pertanyaan operasional seperti "penjualan hari ini", "stok menipis", "laba rugi", "proyeksi arus kas", dan "produk terlaris" tetap bisa saya jawab lewat jalur cepat. ' +
@@ -113,7 +158,6 @@ export class AiService {
     try {
       const snapshot = await this.fastPath.snapshot(user.tenantId);
       const result = await this.nim.answer(user.tenantId, question, snapshot);
-      await this.incrementUsage(user.tenantId);
       const refs = [`llm:${result.model}`, 'konteks:snapshot_bisnis'];
       await this.log(user.tenantId, user.sub, question, result.answer, refs);
       return {
@@ -124,6 +168,8 @@ export class AiService {
         cached: result.cached,
       };
     } catch (err) {
+      // Panggilan gagal tidak boleh membebankan kuota.
+      await this.releaseUsage(user.tenantId);
       const answer =
         err instanceof NimNotConfiguredError
           ? 'Model AI utama (NVIDIA NIM) belum dikonfigurasi — atur NIM_API_KEY di server. Sementara itu, saya tetap bisa menjawab lewat jalur cepat: "penjualan hari ini", "stok menipis", "laba rugi 30 hari", "proyeksi arus kas", "produk terlaris", "bandingkan outlet", atau panduan "cara tambah produk".'
@@ -164,11 +210,4 @@ export class AiService {
   }
 
   // OCR struk/invoice — butuh vision model (NIM_VISION_MODEL)
-  ocr() {
-    return {
-      status: 'unavailable',
-      message:
-        'Smart Receipt OCR belum aktif. Atur NIM_VISION_MODEL (mis. model VLM di NVIDIA NIM) untuk mengaktifkan ekstraksi struk/invoice.',
-    };
-  }
 }

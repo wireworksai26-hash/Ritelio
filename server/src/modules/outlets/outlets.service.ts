@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
+import { defaultCompanyId } from '../../common/utils/default-company';
 import type { CreateOutletDto, UpdateOutletDto } from './dto/outlet.dto';
 
 @Injectable()
@@ -19,10 +20,11 @@ export class OutletsService {
   }
 
   async list(tenantId: string) {
+    const companyId = await defaultCompanyId(this.prisma, tenantId);
     const outlets = await this.prisma.outlet.findMany({
       where: { tenantId },
       include: {
-        warehouses: true,
+        warehouses: { where: { companyId } },
         _count: { select: { transactions: true } },
       },
       orderBy: { createdAt: 'asc' },
@@ -35,19 +37,28 @@ export class OutletsService {
   }
 
   async create(tenantId: string, dto: CreateOutletDto) {
+    const companyId = await defaultCompanyId(this.prisma, tenantId);
     // Outlet baru otomatis dapat gudang bawaan "Gudang {name}" (atomic)
     return this.prisma.$transaction(async (trx) => {
       const outlet = await trx.outlet.create({
         data: { tenantId, name: dto.name, address: dto.address ?? '' },
       });
+      const warehouseCount = await trx.warehouse.count({ where: { tenantId, companyId } });
       await trx.warehouse.create({
-        data: { tenantId, outletId: outlet.id, name: `Gudang ${dto.name}` },
+        data: {
+          tenantId,
+          companyId,
+          outletId: outlet.id,
+          code: `WH-${String(warehouseCount + 1).padStart(4, '0')}`,
+          name: `Gudang ${dto.name}`,
+        },
       });
       return outlet;
     });
   }
 
   async update(tenantId: string, id: string, dto: UpdateOutletDto) {
+    const companyId = await defaultCompanyId(this.prisma, tenantId);
     await this.findOwned(tenantId, id);
 
     const data: Prisma.OutletUpdateInput = {};
@@ -57,7 +68,7 @@ export class OutletsService {
     return this.prisma.outlet.update({
       where: { id },
       data,
-      include: { warehouses: true },
+      include: { warehouses: { where: { companyId } } },
     });
   }
 

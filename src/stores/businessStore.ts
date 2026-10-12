@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { apiConfigured, apiFetch } from '../lib/api';
 import { broadcastStateChange } from '../lib/broadcast';
+import { toSalePayload } from '../lib/offlineQueue';
 import { useModuleStore } from './moduleStore';
 import type {
   Customer,
@@ -844,25 +845,24 @@ export const useBusinessStore = create<BusinessState>()(
           broadcastStateChange('STOCK_UPDATED', payload);
         }
 
-        // Kirim transaksi ke backend API
+        // Kirim transaksi ke backend. Bila gagal (offline, server mati, ditolak), transaksi
+        // masuk antrean lokal yang dikirim ulang saat koneksi pulih — tidak boleh hilang diam-diam.
         if (apiConfigured()) {
-          apiFetch('/v1/sales/transactions', {
-            method: 'POST',
-            body: JSON.stringify({
-              clientGeneratedId: tx.client_generated_id || tx.id,
-              outletId: tx.outlet_id,
-              cashierId: tx.cashier_id,
-              customerId: tx.customer_id,
-              total: tx.total,
-              paymentMethod: tx.payment_method,
-              clientTimestamp: tx.client_timestamp,
-              items: tx.items.map((i) => ({
-                productId: i.product_id,
-                qty: i.qty,
-                price: i.price,
-              })),
-            }),
-          }).catch(() => {});
+          const body = toSalePayload(tx);
+          apiFetch('/v1/sales/transactions', { method: 'POST', body: JSON.stringify(body) })
+            .then(() => {
+              set((state) => ({
+                transactions: state.transactions.map((t) =>
+                  t.id === tx.id ? { ...t, sync_status: 'synced' as const, server_timestamp: new Date().toISOString() } : t,
+                ),
+              }));
+            })
+            .catch(() => {
+              void import('./syncStore').then(({ useSyncStore }) => {
+                useSyncStore.getState().queueTransaction(tx);
+                if (typeof navigator === 'undefined' || navigator.onLine) void useSyncStore.getState().syncNow();
+              });
+            });
         }
       },
 

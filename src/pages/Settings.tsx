@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CompaniesPanel } from '../components/company/CompaniesPanel';
 import { Reveal } from '../components/Reveal';
 import { Icon, type IconName } from '../components/icons/Icon';
 import { Badge } from '../components/ui/Badge';
@@ -561,6 +562,10 @@ export default function Settings() {
       </Reveal>
 
       {/* Tim Karyawan & Hak Akses Peran */}
+      <Reveal delay={0.18}>
+        <CompaniesPanel />
+      </Reveal>
+
       <Reveal delay={0.2}>
         <Card>
           <CardHeader
@@ -754,7 +759,7 @@ export default function Settings() {
                   if (!v) {
                     const n = pendingLocal.length;
                     setOnline(true);
-                    toast({ title: `Kembali online — ${n} antrean disinkronkan`, icon: 'online' });
+                    toast({ title: n > 0 ? `Kembali online. Mengirim ${n} antrean ke server.` : 'Kembali online.', icon: 'online' });
                   } else {
                     setOnline(false);
                   }

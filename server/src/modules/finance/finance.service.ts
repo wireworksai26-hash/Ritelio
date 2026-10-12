@@ -6,6 +6,11 @@ import {
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
+import { roundMoney } from '../../common/utils/money';
+import { defaultCompanyId } from '../../common/utils/default-company';
+import { JournalService } from '../accounting/journal.service';
+import { LEDGER_STATUSES } from '../accounting/ledger';
+import { FxService } from './fx.service';
 import type { CreateEntryDto, ResolveAnomalyDto } from './dto/finance.dto';
 
 interface CashflowPoint {
@@ -15,9 +20,16 @@ interface CashflowPoint {
   forecast: boolean;
 }
 
+/** Klasifikasi akun HPP memakai awalan kode 5 (konvensi PSAK). */
+const COGS_CODE_PREFIX = /^5\d+$/;
+
 @Injectable()
 export class FinanceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly journals: JournalService,
+    private readonly fx: FxService,
+  ) {}
 
   /** Format tanggal lokal menjadi 'YYYY-MM-DD'. */
   private fmtDate(d: Date): string {
@@ -27,17 +39,29 @@ export class FinanceService {
     return `${y}-${m}-${day}`;
   }
 
+  /** Akhir hari (23:59:59.999) waktu lokal. */
+  private endOfDay(d: Date): Date {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+  }
+
   /** Awal hari (00:00) waktu lokal. */
   private startOfDay(d: Date): Date {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
 
-  /** Escape nilai CSV: kutip ganda digandakan, bungkus kutip bila perlu. */
+  /**
+   * Escape nilai CSV untuk spreadsheet.
+   * Selain quoting, menutup formula injection: Excel/LibreOffice/Sheets mengeksekusi
+   * sel yang diawali =, +, -, @ atau karakter kontrol saat file dibuka.
+   */
   private csvCell(value: string): string {
-    if (/[",\n\r]/.test(value)) {
-      return `"${value.replace(/"/g, '""')}"`;
+    const neutralized = /^[\s]*[=+\-@\t\r]/.test(value) || /^[\t\r]/.test(value)
+      ? `'${value}`
+      : value;
+    if (/[",\n\r]/.test(neutralized)) {
+      return `"${neutralized.replace(/"/g, '""')}"`;
     }
-    return value;
+    return neutralized;
   }
 
   /** Format angka rupiah untuk pesan notifikasi. */
@@ -46,63 +70,115 @@ export class FinanceService {
   }
 
   /** Laporan laba rugi ringkas untuk N hari terakhir. */
-  async profitLoss(tenantId: string, days = 30) {
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  /**
+   * Laporan laba rugi diturunkan dari buku besar (journal_lines), bukan dari
+   * tabel transaksi. Alasannya: HPP pada jurnal memakai moving average saat
+   * penjualan terjadi, sementara product.costPrice hanya harga master. Kalau
+   * laporan memakai harga master, angka laporan tidak akan cocok dengan jurnal
+   * dan laba menipu.
+   *
+   * Klasifikasi memakai konvensi kode akun PSAK: 5xxx = HPP, selain itu = beban
+   * operasional.
+   */
+  async profitLoss(tenantId: string, days = 30, currency?: string) {
+    const now = new Date();
+    const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    const until = this.endOfDay(now);
+    const companyId = await defaultCompanyId(this.prisma, tenantId);
+    const fx = await this.fx.rates(tenantId, companyId, now, currency);
+    const toReporting = (value: number) => this.fx.convert(fx, value, fx.baseCurrency).amount;
 
-    const [salesAgg, items, opexAgg] = await Promise.all([
-      this.prisma.salesTransaction.aggregate({
-        where: { tenantId, clientTimestamp: { gte: since } },
-        _sum: { total: true },
-      }),
-      // HPP: item transaksi pada periode (item tidak punya tenantId, filter via relasi)
-      this.prisma.salesTransactionItem.findMany({
-        where: { transaction: { tenantId, clientTimestamp: { gte: since } } },
-        select: { qty: true, product: { select: { costPrice: true } } },
-      }),
-      // Beban operasional: konvensi sourceModule 'finance'
-      this.prisma.financialEntry.aggregate({
-        where: { tenantId, sourceModule: 'finance', entryDate: { gte: since } },
-        _sum: { amount: true },
-      }),
-    ]);
+    // Neto per akun (debit - kredit): jurnal pembalik dan retur mengurangi
+    // pendapatan/beban, bukan diabaikan. Jurnal asal yang sudah dibalik
+    // (voided) ikut terbaca agar pasangannya saling meniadakan.
+    const rows = await this.prisma.journalLine.groupBy({
+      by: ['accountId', 'direction'],
+      where: {
+        tenantId,
+        companyId,
+        journal: { status: { in: LEDGER_STATUSES }, entryDate: { gte: since, lte: until } },
+        account: { type: { in: ['revenue', 'expense'] } },
+      },
+      _sum: { amount: true },
+    });
+    const accounts = await this.prisma.chartOfAccount.findMany({
+      where: { tenantId, companyId, type: { in: ['revenue', 'expense'] } },
+      select: { id: true, code: true, type: true },
+    });
+    const accountById = new Map(accounts.map((a) => [a.id, a]));
 
-    const revenue = Number(salesAgg._sum.total ?? 0);
-    const cogs = items.reduce((s, i) => s + Number(i.qty) * Number(i.product.costPrice), 0);
-    const opex = Number(opexAgg._sum.amount ?? 0);
-    const gross = revenue - cogs;
-    const net = gross - opex;
+    let revenueBase = 0;
+    let cogsBase = 0;
+    let opexBase = 0;
+    for (const row of rows) {
+      const account = accountById.get(row.accountId);
+      if (!account) continue;
+      const amount = Number(row._sum.amount ?? 0);
+      const debitMinusCredit = row.direction === 'debit' ? amount : -amount;
+      if (account.type === 'revenue') revenueBase -= debitMinusCredit;
+      else if (COGS_CODE_PREFIX.test(account.code)) cogsBase += debitMinusCredit;
+      else opexBase += debitMinusCredit;
+    }
+
+    const revenue = roundMoney(toReporting(roundMoney(revenueBase)));
+    const cogsRounded = roundMoney(toReporting(roundMoney(cogsBase)));
+    const opexRounded = roundMoney(toReporting(roundMoney(opexBase)));
+    const gross = roundMoney(revenue - cogsRounded);
+    const net = roundMoney(gross - opexRounded);
     const marginPct = revenue > 0 ? Math.round((gross / revenue) * 100) : 0;
 
-    return { periodDays: days, revenue, cogs, gross, opex, net, marginPct };
+    return {
+      periodDays: days,
+      from: this.fmtDate(since),
+      to: this.fmtDate(now),
+      currency: fx.reportingCurrency,
+      fxFallbackUsed: fx.fallbackUsed,
+      revenue,
+      cogs: cogsRounded,
+      gross,
+      opex: opexRounded,
+      net,
+      marginPct,
+    };
   }
 
   /** Arus kas aktual per hari + prakiraan linear sederhana (lokal, tanpa modul AI). */
-  async cashflow(tenantId: string, days = 14, forecastDays = 30) {
+  async cashflow(tenantId: string, days = 14, forecastDays = 30, currency?: string) {
+    const companyId = await defaultCompanyId(this.prisma, tenantId);
     const today = this.startOfDay(new Date());
     const start = new Date(today);
     start.setDate(start.getDate() - (days - 1));
 
-    const [sales, entries] = await Promise.all([
-      this.prisma.salesTransaction.findMany({
-        where: { tenantId, clientTimestamp: { gte: start } },
-        select: { total: true, clientTimestamp: true },
-      }),
-      this.prisma.financialEntry.findMany({
-        where: { tenantId, sourceModule: 'finance', entryDate: { gte: start } },
-        select: { amount: true, entryDate: true },
-      }),
-    ]);
+    // Arus kas dihitung dari jurnal GL, bukan dari tabel transaksi.
+    // Membaca `salesTransaction`/`financialEntry` dulu berarti laporan bisa
+    // berbeda dari buku besar untuk nominal yang sama — melanggar prinsip
+    // "GL adalah satu-satunya sumber kebenaran".
+    const fx = await this.fx.rates(tenantId, companyId, new Date(), currency);
+    const toReporting = (value: number) => this.fx.convert(fx, value, fx.baseCurrency).amount;
 
-    // Kelompokkan ke map per tanggal
-    const inflowMap = new Map<string, number>();
-    for (const s of sales) {
-      const key = this.fmtDate(new Date(s.clientTimestamp));
-      inflowMap.set(key, (inflowMap.get(key) ?? 0) + Number(s.total));
+    const cashAccountIds = await this.cashAccountIds(tenantId, companyId);
+    if (cashAccountIds.length === 0) {
+      throw new NotFoundException(
+        'Akun kas belum ada pada COA perusahaan, arus kas tidak bisa dihitung.',
+      );
     }
+
+    const lines = await this.prisma.journalLine.findMany({
+      where: {
+        tenantId,
+        companyId,
+        accountId: { in: cashAccountIds },
+        journal: { status: { in: LEDGER_STATUSES }, entryDate: { gte: start, lte: this.endOfDay(today) } },
+      },
+      select: { direction: true, amount: true, journal: { select: { entryDate: true } } },
+    });
+
+    const inflowMap = new Map<string, number>();
     const outflowMap = new Map<string, number>();
-    for (const e of entries) {
-      const key = this.fmtDate(new Date(e.entryDate));
-      outflowMap.set(key, (outflowMap.get(key) ?? 0) + Number(e.amount));
+    for (const line of lines) {
+      const key = this.fmtDate(new Date(line.journal.entryDate));
+      const target = line.direction === 'debit' ? inflowMap : outflowMap;
+      target.set(key, (target.get(key) ?? 0) + Number(line.amount));
     }
 
     // Seri aktual: dari (hari ini - (days-1)) sampai hari ini
@@ -113,78 +189,145 @@ export class FinanceService {
       const key = this.fmtDate(d);
       series.push({
         date: key,
-        inflow: Math.round(inflowMap.get(key) ?? 0),
-        outflow: Math.round(outflowMap.get(key) ?? 0),
+        inflow: Math.round(toReporting(inflowMap.get(key) ?? 0)),
+        outflow: Math.round(toReporting(outflowMap.get(key) ?? 0)),
         forecast: false,
       });
     }
 
-    // Rata-rata 7 hari aktual terakhir sebagai dasar prakiraan
-    const last7 = series.slice(-7);
-    const avgIn = last7.reduce((s, p) => s + p.inflow, 0) / (last7.length || 1);
-    const avgOut = last7.reduce((s, p) => s + p.outflow, 0) / (last7.length || 1);
+// Prakiraan memakai pola mingguan aktual, bukan garis lurus. Pemerataan juga
+    // memperhitungkan hari dengan toko tutup: hari yang kosong dianggap tutup,
+    // bukan omzet nol.
+    const avgIn = averageByWeekday(series, 'inflow');
+    const avgOut = averageByWeekday(series, 'outflow');
+    const weekdayAverages = avgIn.length > 0;
 
     for (let i = 1; i <= forecastDays; i++) {
       const d = new Date(today);
       d.setDate(d.getDate() + i);
+      if (!weekdayAverages) continue;
+      const weekday = d.getDay();
       series.push({
         date: this.fmtDate(d),
-        inflow: Math.round(avgIn * (1 + i * 0.005)),
-        outflow: Math.round(avgOut),
+        inflow: Math.round(toReporting(avgIn[weekday] ?? 0)),
+        outflow: Math.round(toReporting(avgOut[weekday] ?? 0)),
         forecast: true,
       });
     }
 
-    return { days, forecastDays, series };
+    const actual = series.filter((p) => !p.forecast);
+    return {
+      days,
+      forecastDays,
+      series,
+      currency: fx.reportingCurrency,
+      fxFallbackUsed: fx.fallbackUsed,
+      totals: {
+        inflow: actual.reduce((s, p) => s + p.inflow, 0),
+        outflow: actual.reduce((s, p) => s + p.outflow, 0),
+        net: actual.reduce((s, p) => s + p.inflow - p.outflow, 0),
+      },
+      method: weekdayAverages
+        ? 'pola mingguan dari jurnal GL'
+        : 'belum ada data cukup untuk prakiraan',
+    };
+  }
+
+  /**
+   * Akun kas = akun 1000 ditambah akun COA yang ditautkan ke rekening bank aktif,
+   * supaya penerimaan/pembayaran lewat rekening selain 1000 tetap terbaca.
+   */
+  private async cashAccountIds(tenantId: string, companyId: string): Promise<string[]> {
+    const [cash, banks] = await Promise.all([
+      this.prisma.chartOfAccount.findFirst({
+        where: { tenantId, companyId, code: '1000', type: 'asset' },
+        select: { id: true },
+      }),
+      this.prisma.bankAccount.findMany({
+        where: { tenantId, companyId, isActive: true },
+        select: { accountId: true },
+      }),
+    ]);
+    return [...new Set([...(cash ? [cash.id] : []), ...banks.map((b) => b.accountId)])];
   }
 
   /** Ambil peta id akun -> {code, name} untuk tenant (COA tidak berelasi ke financialEntry). */
   private async accountMap(tenantId: string) {
-    const accounts = await this.prisma.chartOfAccount.findMany({ where: { tenantId } });
+    const companyId = await defaultCompanyId(this.prisma, tenantId);
+    const accounts = await this.prisma.chartOfAccount.findMany({ where: { tenantId, companyId } });
     return new Map(accounts.map((a) => [a.id, { code: a.code, name: a.name }]));
   }
 
-  /** Daftar jurnal terbaru dulu, dengan nama akun debit/kredit. */
+/**
+ * Daftar jurnal sebagai tampilan薄 untuk endpoint lama `/finance/entries`.
+ * Sekarang dibaca dari `journal_headers`/`journal_lines`, bukan
+ * `financial_entries` — supaya UI yang sudah ada tetap jalan tanpa perlu
+ * punya sumber kedua yang bisa berbeda dari buku besar.
+ *
+ * `anomaly` tidak lagi jadi filter di sini; penandaan anomali hidup di
+ * `ai_insight_logs` yang memang surpassed dipakai AI.
+ */
   async entries(
     tenantId: string,
     query: { anomaly?: string; page?: number; limit?: number },
   ) {
+    const companyId = await defaultCompanyId(this.prisma, tenantId);
     const page = Math.max(query.page ?? 1, 1);
     const limit = Math.min(Math.max(query.limit ?? 20, 1), 100);
-    const where: Prisma.FinancialEntryWhereInput = {
-      tenantId,
-      ...(query.anomaly === 'true' ? { isAnomalyFlagged: true } : {}),
-    };
 
-    const [rows, total, accounts] = await Promise.all([
-      this.prisma.financialEntry.findMany({
+    const where = { tenantId, companyId, ...(query.anomaly === 'true' ? { sourceModule: 'anomaly' } : {}) };
+    const [rows, total] = await Promise.all([
+      this.prisma.journalHeader.findMany({
         where,
-        orderBy: [{ entryDate: 'desc' }, { createdAt: 'desc' }],
+        include: { lines: { orderBy: { lineNo: 'asc' } } },
+        orderBy: [{ entryDate: 'desc' }, { number: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
-      this.prisma.financialEntry.count({ where }),
-      this.accountMap(tenantId),
+      this.prisma.journalHeader.count({ where }),
     ]);
 
-    const data = rows.map((e) => ({
-      ...e,
-      amount: Number(e.amount),
-      debitAccount: accounts.get(e.debitAccountId) ?? null,
-      creditAccount: accounts.get(e.creditAccountId) ?? null,
-    }));
+    const accountIds = [...new Set(rows.flatMap((r) => r.lines.map((l) => l.accountId)))];
+    const accounts = await this.prisma.chartOfAccount.findMany({
+      where: { id: { in: accountIds } },
+      select: { id: true, code: true, name: true },
+    });
+    const accMap = new Map(accounts.map((a) => [a.id, { code: a.code, name: a.name }]));
+
+    const data = rows.map((journal) => {
+      const debit = journal.lines.find((l) => l.direction === 'debit');
+      const credit = journal.lines.find((l) => l.direction === 'credit');
+      return {
+        id: journal.id,
+        number: journal.number,
+        sourceModule: journal.sourceModule,
+        sourceRefId: journal.sourceRefId,
+        entryDate: journal.entryDate,
+        status: journal.status,
+        memo: journal.memo,
+        amount: Number(debit?.amount ?? 0),
+        debitAccount: accMap.get(debit?.accountId ?? '') ?? null,
+        creditAccount: accMap.get(credit?.accountId ?? '') ?? null,
+        lineCount: journal.lines.length,
+        isAnomalyFlagged: false,
+      };
+    });
 
     return { data, meta: { page, limit, total } };
   }
 
   /** Jurnal manual: validasi kedua kode akun ada di COA tenant. */
   async createEntry(tenantId: string, dto: CreateEntryDto) {
+    if (dto.debitAccountCode === dto.creditAccountCode) {
+      throw new BadRequestException('Akun debit dan kredit tidak boleh sama.');
+    }
+    const companyId = await defaultCompanyId(this.prisma, tenantId);
     const [debit, credit] = await Promise.all([
       this.prisma.chartOfAccount.findFirst({
-        where: { tenantId, code: dto.debitAccountCode },
+        where: { tenantId, companyId, code: dto.debitAccountCode },
       }),
       this.prisma.chartOfAccount.findFirst({
-        where: { tenantId, code: dto.creditAccountCode },
+        where: { tenantId, companyId, code: dto.creditAccountCode },
       }),
     ]);
     if (!debit) {
@@ -194,36 +337,61 @@ export class FinanceService {
       throw new NotFoundException(`Akun ${dto.creditAccountCode} tidak ditemukan.`);
     }
 
-    const entry = await this.prisma.financialEntry.create({
-      data: {
+    // Tanggal entri dikunci: menolak backdate lebih dari 90 hari dan tanggal
+    // masa depan, supaya jurnal tidak bisa ditulis ke periode yang sudah tutup.
+    const now = new Date();
+    const entryDate = dto.entryDate ? new Date(dto.entryDate) : now;
+    if (Number.isNaN(entryDate.getTime())) {
+      throw new BadRequestException('Tanggal jurnal tidak valid.');
+    }
+    const daysFromNow = (entryDate.getTime() - now.getTime()) / 86_400_000;
+    if (daysFromNow > 1) {
+      throw new BadRequestException('Tanggal jurnal tidak boleh di masa depan.');
+    }
+    if (daysFromNow < -90) {
+      throw new BadRequestException('Backdate jurnal dibatasi maksimal 90 hari.');
+    }
+
+const entry = await this.prisma.$transaction(async (tx) =>
+      this.journals.post(tx, {
         tenantId,
+        companyId,
+        entryDate,
         sourceModule: 'finance',
         sourceRefId: `manual:${dto.note ?? 'jurnal'}`,
-        debitAccountId: debit.id,
-        creditAccountId: credit.id,
-        amount: dto.amount,
-        entryDate: dto.entryDate ? new Date(dto.entryDate) : new Date(),
-      },
-    });
-    return { ...entry, amount: Number(entry.amount) };
+        memo: dto.note ?? 'Jurnal manual',
+        lines: [
+          { accountId: debit.id, direction: 'debit', amount: dto.amount, memo: dto.note ?? '' },
+          { accountId: credit.id, direction: 'credit', amount: dto.amount, memo: dto.note ?? '' },
+        ],
+      }),
+    );
+    return {
+      id: entry.id,
+      number: entry.number,
+      entryDate: entry.entryDate,
+      amount: dto.amount,
+      debitAccount: { code: debit.code, name: debit.name },
+      creditAccount: { code: credit.code, name: credit.name },
+    };
   }
 
-  /**
-   * Resolusi flag anomali:
-   * - valid=false -> cabut flag + catat feedback ke aiInsightLog
-   * - valid=true  -> pertahankan flag + eskalasi via notification
-   */
+/**
+ * Tindak lanjuti penandaan anomali dari AI.
+ * Sekarang id yang diberikan adalah `journalHeader` — flag tidak lagi
+ * disimpan pada baris `financial_entries` yang sudah tidak dipakai.
+ */
   async resolveAnomaly(tenantId: string, id: string, dto: ResolveAnomalyDto, user: AuthUser) {
-    const entry = await this.prisma.financialEntry.findFirst({ where: { id, tenantId } });
-    if (!entry) {
-      throw new NotFoundException('Entry tidak ditemukan.');
+    const companyId = await defaultCompanyId(this.prisma, tenantId);
+    const journal = await this.prisma.journalHeader.findFirst({
+      where: { id, tenantId, companyId },
+      include: { lines: { select: { direction: true, amount: true } } },
+    });
+    if (!journal) {
+      throw new NotFoundException('Jurnal tidak ditemukan.');
     }
 
     if (!dto.valid) {
-      const updated = await this.prisma.financialEntry.update({
-        where: { id: entry.id },
-        data: { isAnomalyFlagged: false },
-      });
       await this.prisma.aiInsightLog.create({
         data: {
           tenantId,
@@ -231,32 +399,24 @@ export class FinanceService {
           module: 'finance',
           insightType: 'anomaly',
           title: 'Anomali ditandai tidak valid',
-          content: `Entry ${id} ditandai bukan anomali oleh pengguna.`,
-          basedOnRefs: [`financial_entries:${id}`],
+          content: `Jurnal ${journal.number} ditandai bukan anomali oleh pengguna.`,
+          basedOnRefs: [`journal_headers:${journal.id}`],
         },
       });
-      return { ...updated, amount: Number(updated.amount) };
+      return { id: journal.id, number: journal.number, resolved: 'dismissed' };
     }
 
+const amount = journal.lines.find((l) => l.direction === 'debit')?.amount ?? 0;
     await this.prisma.notification.create({
       data: {
         tenantId,
         type: 'approval',
         title: 'Anomali dieskalasi',
-        body: `Pengeluaran/entry ${id} senilai ${this.rupiah(Number(entry.amount))} dikonfirmasi sebagai anomali dan dieskalasi.`,
+        body: `Jurnal ${journal.number} senilai ${this.rupiah(Number(amount))} dikonfirmasi sebagai anomali dan dieskalasi.`,
         link: '/app/finance',
       },
     });
-    return { ...entry, amount: Number(entry.amount) };
-  }
-
-  /** Daftar COA tenant, urut kode akun. */
-  async accounts(tenantId: string) {
-    const data = await this.prisma.chartOfAccount.findMany({
-      where: { tenantId },
-      orderBy: { code: 'asc' },
-    });
-    return { data };
+    return { id: journal.id, number: journal.number, resolved: 'escalated' };
   }
 
   /** Bangun CSV jurnal periode; hanya format csv yang didukung. */
@@ -266,31 +426,53 @@ export class FinanceService {
     }
 
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const [rows, accounts] = await Promise.all([
-      this.prisma.financialEntry.findMany({
-        where: { tenantId, entryDate: { gte: since } },
-        orderBy: { entryDate: 'asc' },
-      }),
-      this.accountMap(tenantId),
-    ]);
+    const companyId = await defaultCompanyId(this.prisma, tenantId);
+    const rows = await this.prisma.journalLine.findMany({
+      where: {
+        tenantId,
+        companyId,
+        journal: { status: { in: LEDGER_STATUSES }, entryDate: { gte: since } },
+      },
+      include: { account: { select: { code: true, name: true } }, journal: { select: { number: true, entryDate: true } } },
+      orderBy: [{ journal: { entryDate: 'asc' } }, { lineNo: 'asc' }],
+    });
+    const accounts = await this.accountMap(tenantId);
 
-    const header = ['Tanggal', 'Modul', 'Referensi', 'Akun Debit', 'Akun Kredit', 'Jumlah'];
-    const lines = rows.map((e) => {
-      const debit = accounts.get(e.debitAccountId);
-      const credit = accounts.get(e.creditAccountId);
-      return [
-        this.fmtDate(new Date(e.entryDate)),
-        e.sourceModule,
-        e.sourceRefId,
-        debit ? `${debit.code} - ${debit.name}` : e.debitAccountId,
-        credit ? `${credit.code} - ${credit.name}` : e.creditAccountId,
-        String(Number(e.amount)),
+const header = ['Tanggal', 'Jurnal', 'Baris', 'Akun', 'Kode', 'Debit', 'Kredit', 'Memo'];
+    const lines = rows.map((line) =>
+      [
+        this.fmtDate(new Date(line.journal.entryDate)),
+        line.journal.number,
+        String(line.lineNo),
+        line.account.name,
+        line.account.code,
+        line.direction === 'debit' ? String(Number(line.amount)) : '0',
+        line.direction === 'credit' ? String(Number(line.amount)) : '0',
+        line.memo,
       ]
         .map((c) => this.csvCell(c))
-        .join(',');
-    });
+        .join(','),
+    );
 
     // BOM agar Excel membaca UTF-8 dengan benar
     return '\uFEFF' + [header.join(','), ...lines].join('\r\n');
   }
+}
+
+/**
+ * Rata-rata per hari-dalam-minggu dari seri aktual. Hari tanpa transaksi di
+ * dalam rentang dianggap hari tutup, bukan angka nol — ini yang membedakan
+ * "tutup" dari "omzetnya memang nol".
+ */
+function averageByWeekday(series: CashflowPoint[], field: 'inflow' | 'outflow'): number[] {
+  const sums = Array.from({ length: 7 }, () => ({ total: 0, days: 0 }));
+  for (const point of series) {
+    if (point.forecast) continue;
+    const [y, m, d] = point.date.split('-').map(Number);
+    const day = new Date(y, m - 1, d).getDay();
+    sums[day].total += point[field];
+    sums[day].days += 1;
+  }
+  const out = sums.map((s) => (s.days > 0 ? s.total / s.days : 0));
+  return out.some((v) => v > 0) ? out : [];
 }

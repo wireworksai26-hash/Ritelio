@@ -1,9 +1,12 @@
 import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
 
+/** Role recognized by the API. 'superadmin' mirrors Prisma's Role enum (platform). */
+export type AppRole = 'owner' | 'admin' | 'manager' | 'cashier' | 'staff' | 'superadmin';
+
 export interface AuthUser {
   sub: string;
   tenantId: string;
-  role: 'owner' | 'admin' | 'manager' | 'cashier' | 'staff';
+  role: AppRole;
   email: string;
 }
 

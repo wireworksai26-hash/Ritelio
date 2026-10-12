@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Reveal } from '../components/Reveal';
 import { BarChart } from '../components/charts/BarChart';
+import { LineChart } from '../components/charts/LineChart';
 import { Icon } from '../components/icons/Icon';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -10,12 +11,12 @@ import { PageHeader } from '../components/ui/PageHeader';
 import { Pagination } from '../components/ui/Pagination';
 import { Stat } from '../components/ui/Stat';
 import { useModuleStore } from '../stores/moduleStore';
-import { formatDate, formatIDR, formatNumber, greeting } from '../lib/format';
+import { formatDate, formatDayShort, formatIDR, formatNumber, greeting } from '../lib/format';
+import { listOf, useResource } from '../lib/useResource';
 import {
   conflictCount,
   lowStockItems,
   outletPerformance,
-  pendingSyncCount,
   salesByDay,
   salesToday,
   topProducts,
@@ -56,7 +57,7 @@ export default function Dashboard() {
     selected === 'all'
       ? 'Semua Outlet'
       : `Outlet ${outlets.find((o) => o.id === selected)?.name ?? ''}`;
-  const pendingTotal = pendingSyncCount() + pendingLocal.length;
+  const pendingTotal = pendingLocal.length;
   const today = useMemo(() => salesToday(), [allTransactions, selected, tenant.id]);
   const lowStock = useMemo(() => lowStockItems(), [allStocks, selected, tenant.id]);
 
@@ -122,16 +123,22 @@ export default function Dashboard() {
               <span className="text-ink">
                 {isOnline
                   ? `${pendingTotal} transaksi menunggu sinkronisasi.`
-                  : 'Mode offline aktif — transaksi disimpan lokal dan disinkronkan otomatis.'}
+                  : 'Mode offline aktif. Transaksi POS disimpan di perangkat dan dikirim otomatis saat online; modul lain butuh koneksi.'}
               </span>
             </div>
             <Button
               variant="subtle"
               size="sm"
               className="self-end sm:self-auto shrink-0"
-              onClick={() => {
-                useSyncStore.getState().syncNow();
-                toast({ title: 'Sinkronisasi selesai', icon: 'sync' });
+              disabled={!isOnline}
+              onClick={async () => {
+                const sent = await useSyncStore.getState().syncNow();
+                const left = useSyncStore.getState().pendingLocal.length;
+                toast(
+                  left === 0
+                    ? { title: `${sent} transaksi tersinkron ke server`, icon: 'sync' }
+                    : { title: `${sent} transaksi terkirim, ${left} masih menunggu`, description: 'Periksa koneksi lalu coba lagi.', icon: 'warning' },
+                );
               }}
             >
               Sinkronkan
@@ -151,13 +158,7 @@ export default function Dashboard() {
                 variant="ghost"
                 icon="scan"
                 className="flex-1 sm:flex-initial"
-                onClick={() =>
-                  toast({
-                    title: 'Pindai Barcode',
-                    description: 'Kamera scanner aktif di build ini segera.',
-                    icon: 'scan',
-                  })
-                }
+                onClick={() => navigate('/app/inventory?scan=1')}
               >
                 Scan
               </Button>
@@ -231,6 +232,9 @@ export default function Dashboard() {
           <Stat label="Perlu Review" value={String(conflictCount())} hint="konflik sinkron" />
         </div>
       </Reveal>
+
+      {/* Ringkasan ERP lintas modul (hanya tampil bila backend mengizinkan) */}
+      <ErpOverview />
 
       {/* Grafik penjualan + produk terlaris */}
       <Reveal delay={0.15}>
@@ -409,5 +413,132 @@ export default function Dashboard() {
         </div>
       </Reveal>
     </div>
+  );
+}
+
+interface DashboardSummary {
+  periodDays: number;
+  currency: string;
+  revenue: number;
+  netProfit: number;
+  marginPct: number;
+  cash: number;
+  inventory: number;
+  openReceivables: number;
+  openPayables: number;
+  salesTrend: Array<{ date: string; revenue: number; transactions: number }>;
+}
+
+interface PipelineSummary {
+  openCount: number;
+  openValue: number;
+  weightedValue: number;
+  winRatePct: number;
+}
+
+interface ProductionOrderLite {
+  status: string;
+}
+
+interface OverviewCardProps {
+  label: string;
+  value: string;
+  hint?: string;
+  to: string;
+}
+
+function OverviewCard({ label, value, hint, to }: OverviewCardProps) {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      onClick={() => navigate(to)}
+      className="text-left rounded-xl border border-ash bg-paper px-3.5 py-3 sm:px-4 sm:py-3.5 min-w-0 min-h-[72px] hover:border-pebble active:bg-sand/50 transition-colors"
+    >
+      <span className="block text-caption text-fossil truncate">{label}</span>
+      <span className="block tnum text-[18px] sm:text-heading-sm text-ink mt-1 break-words">{value}</span>
+      {hint && <span className="block text-caption text-fossil mt-0.5 truncate">{hint}</span>}
+    </button>
+  );
+}
+
+// Ringkasan lintas modul ERP. Setiap sumber data berdiri sendiri: bila sebuah endpoint
+// ditolak (mis. 403 karena role tanpa izin keuangan) atau gagal, bagian itu disembunyikan
+// — dashboard tidak menampilkan error untuk data yang memang bukan hak role tersebut.
+function ErpOverview() {
+  const summary = useResource<DashboardSummary>('/v1/dashboard/summary?days=30');
+  const pipeline = useResource<PipelineSummary>('/v1/crm/pipeline');
+  const orders = useResource<ProductionOrderLite[]>('/v1/manufacturing/orders');
+  const maintenance = useResource<unknown>('/v1/operations/maintenance/due');
+
+  const money = (value: number) => {
+    const currency = summary.data?.currency ?? 'IDR';
+    if (currency === 'IDR') return formatIDR(value);
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
+  };
+
+  const s = summary.data;
+  const p = pipeline.data;
+  const runningOrders = listOf<ProductionOrderLite>(orders.data).filter(
+    (o) => o.status === 'released' || o.status === 'in_progress',
+  ).length;
+  const dueCount = listOf<unknown>(maintenance.data).length;
+
+  const hasOperational = orders.data !== null || maintenance.data !== null;
+  if (!s && !p && !hasOperational) return null;
+
+  const trend = s?.salesTrend ?? [];
+
+  return (
+    <Reveal delay={0.1}>
+      <section aria-label="Ringkasan ERP" className="space-y-3 sm:space-y-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="text-[18px] sm:text-heading-sm font-light text-ink">Ringkasan ERP</h2>
+          {s && <span className="text-caption text-fossil">{s.periodDays} hari terakhir · {s.currency}</span>}
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+          {s && (
+            <>
+              <OverviewCard label="Kas" value={money(s.cash)} to="/app/banking" hint="posisi buku besar" />
+              <OverviewCard label="Piutang terbuka" value={money(s.openReceivables)} to="/app/billing" hint="belum dibayar pelanggan" />
+              <OverviewCard label="Utang terbuka" value={money(s.openPayables)} to="/app/billing" hint="belum dibayar ke vendor" />
+              <OverviewCard label="Laba bersih" value={money(s.netProfit)} to="/app/accounting" hint={`margin kotor ${s.marginPct}%`} />
+            </>
+          )}
+          {p && (
+            <OverviewCard
+              label="Pipeline penjualan"
+              value={money(p.openValue)}
+              to="/app/crm"
+              hint={`${p.openCount} deal · menang ${p.winRatePct}%`}
+            />
+          )}
+          {orders.data && (
+            <OverviewCard label="Produksi berjalan" value={formatNumber(runningOrders)} to="/app/manufacturing" hint="order dilepas / diproses" />
+          )}
+          {maintenance.data !== null && (
+            <OverviewCard label="Perawatan jatuh tempo" value={formatNumber(dueCount)} to="/app/operations" hint="jadwal perlu dikerjakan" />
+          )}
+          {s && <OverviewCard label="Nilai persediaan" value={money(s.inventory)} to="/app/inventory" hint="menurut buku besar" />}
+        </div>
+
+        {s && trend.length >= 2 && (
+          <Card>
+            <CardHeader
+              title="Pendapatan Harian"
+              subtitle={`Dari buku besar dan transaksi tersinkron · total ${money(s.revenue)}`}
+            />
+            <CardBody>
+              <LineChart
+                labels={trend.map((t) => formatDayShort(t.date))}
+                series={[{ name: 'Pendapatan', values: trend.map((t) => t.revenue), color: 'var(--color-ink)' }]}
+                height={180}
+              />
+            </CardBody>
+          </Card>
+        )}
+      </section>
+    </Reveal>
   );
 }

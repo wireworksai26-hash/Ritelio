@@ -156,9 +156,20 @@ export class FastPathService {
       (s, t) => s + t.items.reduce((si, i) => si + Number(i.qty) * Number(i.product.costPrice), 0),
       0,
     );
-    const opexAgg = await this.prisma.financialEntry.aggregate({
+    // Beban operasional diambil dari jurnal GL (akun tipe expense), bukan dari
+    // `financial_entries` yang sudah tidak lagi dipakai sebagai sumber.
+    const expenseAccounts = await this.prisma.chartOfAccount.findMany({
+      where: { tenantId, type: 'expense' },
+      select: { id: true },
+    });
+    const opexAgg = await this.prisma.journalLine.aggregate({
       _sum: { amount: true },
-      where: { tenantId, sourceModule: 'finance', entryDate: { gte: since } },
+      where: {
+        tenantId,
+        accountId: { in: expenseAccounts.map((a) => a.id) },
+        direction: 'debit',
+        journal: { status: 'posted', entryDate: { gte: since } },
+      },
     });
     const opex = Number(opexAgg._sum.amount ?? 0);
     const gross = revenue - cogs;
@@ -166,29 +177,47 @@ export class FastPathService {
     const margin = revenue > 0 ? Math.round((gross / revenue) * 100) : 0;
     return {
       answer: `Laba rugi ${days} hari terakhir:\n• Pendapatan: ${idr.format(revenue)}\n• HPP: ${idr.format(cogs)}\n• Laba kotor: ${idr.format(gross)} (margin ${margin}%)\n• Beban operasional: ${idr.format(opex)}\n• Laba bersih: ${idr.format(net)}`,
-      refs: [`sales_transactions:${days} hari`, `financial_entries:${days} hari`],
+      refs: [`sales_transactions:${days} hari`, `journal_lines:beban ${days} hari`],
     };
   }
 
-  /** Seri arus kas: aktual N hari + forecast linear sederhana (upgrade path: model time-series). */
+  /** Seri arus kas dari akun kas di jurnal GL. */
   async cashflowSeries(tenantId: string, actualDays = 14, forecastDays = 30) {
+    const cashAccount = await this.prisma.chartOfAccount.findFirst({
+      where: { tenantId, code: '1000', type: 'asset' },
+      select: { id: true },
+    });
     const points: Array<{ date: string; inflow: number; outflow: number; forecast: boolean }> = [];
     for (let i = actualDays - 1; i >= 0; i--) {
       const day = startOfDay(new Date(Date.now() - i * 86400000));
       const next = new Date(day.getTime() + 86400000);
       const [inAgg, outAgg] = await Promise.all([
-        this.prisma.salesTransaction.aggregate({
-          _sum: { total: true },
-          where: { tenantId, clientTimestamp: { gte: day, lt: next } },
-        }),
-        this.prisma.financialEntry.aggregate({
-          _sum: { amount: true },
-          where: { tenantId, sourceModule: 'finance', entryDate: { gte: day, lt: next } },
-        }),
+        cashAccount
+          ? this.prisma.journalLine.aggregate({
+              _sum: { amount: true },
+              where: {
+                tenantId,
+                accountId: cashAccount.id,
+                direction: 'debit',
+                journal: { status: 'posted', entryDate: { gte: day, lt: next } },
+              },
+            })
+          : Promise.resolve({ _sum: { amount: null } }),
+        cashAccount
+          ? this.prisma.journalLine.aggregate({
+              _sum: { amount: true },
+              where: {
+                tenantId,
+                accountId: cashAccount.id,
+                direction: 'credit',
+                journal: { status: 'posted', entryDate: { gte: day, lt: next } },
+              },
+            })
+          : Promise.resolve({ _sum: { amount: null } }),
       ]);
       points.push({
         date: day.toISOString().slice(0, 10),
-        inflow: Number(inAgg._sum.total ?? 0),
+        inflow: Number(inAgg._sum.amount ?? 0),
         outflow: Number(outAgg._sum.amount ?? 0),
         forecast: false,
       });
@@ -304,8 +333,9 @@ export class FastPathService {
       include: { product: { select: { name: true } } },
     });
     const low = stocks.filter((s) => Number(s.quantity) <= Number(s.minThreshold));
-    const anomalies = await this.prisma.financialEntry.count({
-      where: { tenantId, isAnomalyFlagged: true },
+    // Anomali budding dari insight AI, bukan lagi flag pada baris legacy.
+    const anomalies = await this.prisma.aiInsightLog.count({
+      where: { tenantId, module: 'finance', insightType: 'anomaly' },
     });
     const pending = await this.prisma.salesTransaction.count({
       where: { tenantId, syncStatus: { in: ['pending', 'needs_review', 'conflict'] } },
