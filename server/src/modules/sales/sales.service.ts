@@ -398,7 +398,7 @@ export class SalesService {
 
   async detail(tenantId: string, id: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
-    return this.prisma.salesTransaction.findFirst({
+    const tx = await this.prisma.salesTransaction.findFirst({
       where: { id, tenantId, companyId },
       include: {
         items: { include: { product: true } },
@@ -407,5 +407,8 @@ export class SalesService {
         customer: { select: { name: true } },
       },
     });
+    // Dulu mengembalikan 200 + body kosong untuk id tak dikenal / milik tenant lain.
+    if (!tx) throw new NotFoundException('Transaksi penjualan tidak ditemukan.');
+    return tx;
   }
 }

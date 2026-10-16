@@ -240,6 +240,17 @@ export class JournalService {
       throw new BadRequestException('Jurnal asal tidak memiliki baris yang valid untuk dibalik.');
     }
 
+    // Klaim atomik: hanya satu pembalikan yang boleh mengubah posted -> voided.
+    // Pengecekan reversedBy di atas dibaca tanpa kunci, jadi request paralel sama-sama
+    // lolos; UPDATE bersyarat ini mengunci baris dan yang kalah mendapat count 0.
+    const claimed = await tx.journalHeader.updateMany({
+      where: { id: original.id, tenantId: input.tenantId, companyId: input.companyId, status: 'posted' },
+      data: { status: 'voided' },
+    });
+    if (claimed.count !== 1) {
+      throw new ConflictException(`Jurnal ${original.number} baru saja dibalik oleh permintaan lain.`);
+    }
+
     const lines: JournalLineInput[] = original.lines.map((line) => ({
       accountId: line.accountId,
       direction: line.direction === 'debit' ? 'credit' : 'debit',
@@ -257,11 +268,6 @@ export class JournalService {
       actorId: input.actorId,
       reversalOfId: original.id,
       lines,
-    });
-
-    await tx.journalHeader.update({
-      where: { id: original.id },
-      data: { status: 'voided' },
     });
 
     return tx.journalHeader.findUniqueOrThrow({

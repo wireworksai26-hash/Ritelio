@@ -5,7 +5,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
-  IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -80,7 +80,7 @@ const REQUISITION_STATUSES = ['draft', 'submitted', 'approved', 'rejected', 'con
 
 export class ListRequisitionQueryDto {
   @IsOptional()
-  @IsEnum(REQUISITION_STATUSES)
+  @IsIn(REQUISITION_STATUSES)
   status?: (typeof REQUISITION_STATUSES)[number];
 }
 

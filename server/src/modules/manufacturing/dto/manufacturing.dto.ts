@@ -6,7 +6,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
-  IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -114,7 +114,7 @@ export class QualityCheckDto {
   @Length(2, 80)
   stage!: string;
 
-  @IsEnum(QUALITY_RESULTS)
+  @IsIn(QUALITY_RESULTS)
   result!: (typeof QUALITY_RESULTS)[number];
 
   @IsOptional()

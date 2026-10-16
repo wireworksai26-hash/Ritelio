@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Role, User } from '../types';
-import { apiConfigured, apiFetch, clearTokens, setTokens } from '../lib/api';
+import { isNetworkError } from '../lib/offline';
+import { API_NOT_CONFIGURED_MESSAGE, SESSION_EXPIRED_EVENT, apiConfigured, apiFetch, clearTokens, revokeSession, setTokens } from '../lib/api';
 import { useBusinessStore } from './businessStore';
 import { useOutletStore } from './outletStore';
 
@@ -49,11 +50,17 @@ export const useAuthStore = create<AuthState>()(
 
             return user;
           } catch (err: any) {
-            // Jika backend memberikan pesan spesifik (seperti kata sandi salah), lemparkan error
-            if (err?.message && !err.message.includes('Failed to fetch') && !err.message.includes('NetworkError')) {
-              throw err;
-            }
+            // Jika backend memberikan pesan spesifik (seperti kata sandi salah), lemparkan error.
+            // Hanya galat jaringan (server tak terjangkau) yang boleh jatuh ke fallback dev di bawah.
+            if (!isNetworkError(err)) throw err;
+            if (!import.meta.env.DEV) throw err;
           }
+        }
+
+        // Fallback lokal hanya untuk pengembangan/demo. Di build produksi login selalu lewat server:
+        // fallback ini menerima sandi kosong dan sandi umum untuk akun lokal mana pun.
+        if (!import.meta.env.DEV) {
+          throw new Error(API_NOT_CONFIGURED_MESSAGE);
         }
 
         // Ambil daftar user dari businessStore
@@ -190,6 +197,9 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
+        // Cabut sesi di server (best effort, tidak memblokir UI dan aman saat offline),
+        // lalu hapus sesi lokal segera.
+        void revokeSession().catch(() => {});
         clearTokens();
         set({ user: null });
       },
@@ -197,6 +207,11 @@ export const useAuthStore = create<AuthState>()(
     { name: 'retalio-auth' },
   ),
 );
+
+// Refresh token ditolak server (kedaluwarsa/dicabut/reuse): kosongkan sesi agar router mengarahkan ke login.
+if (typeof window !== 'undefined') {
+  window.addEventListener(SESSION_EXPIRED_EVENT, () => useAuthStore.setState({ user: null }));
+}
 
 export function homePathFor(role?: Role): string {
   switch (role) {

@@ -12,7 +12,7 @@ import { Tabs } from '../ui/Tabs';
 
 type Billing = 'monthly' | 'yearly';
 
-// Section pricing 3 paket: Basic (SBS standar) / +AI (featured) / Custom
+// Section pricing 3 paket: Basic / +AI (featured) / Custom
 export function Pricing() {
   const [billing, setBilling] = useState<Billing>('monthly');
   const navigate = useNavigate();
@@ -26,7 +26,7 @@ export function Pricing() {
         </p>
         <h2 className="mt-4 text-heading-lg font-light text-ink">Harga yang tumbuh bersama bisnismu.</h2>
         <p className="mt-4 text-[17px] text-fossil max-w-xl mx-auto">
-          Mulai dari SBS standar. Naik ke +AI saat kamu butuh prediksi, digest, dan asisten cerdas.
+          Mulai dari kasir, stok, dan laporan keuangan. Naik ke +AI untuk prediksi dan asisten, atau Custom untuk modul ERP lengkap.
         </p>
         <div className="mt-8 flex justify-center">
           <Tabs<Billing>
@@ -113,7 +113,7 @@ export function Pricing() {
       </div>
 
       <p className="mt-8 text-center text-caption text-fossil">
-        Harga dalam IDR, belum termasuk PPN. Upgrade, downgrade, atau berhenti kapan saja — datamu tetap milikmu.
+        Harga dalam IDR, belum termasuk PPN. Upgrade, downgrade, atau berhenti kapan saja. Datamu tetap milikmu.
       </p>
     </div>
   );

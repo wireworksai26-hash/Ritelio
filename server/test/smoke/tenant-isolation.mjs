@@ -13,52 +13,10 @@
 //  6. Referensi id asing di BODY (POST/PATCH tanpa :id) ditolak.
 //
 // Env: SMOKE_OWNER_EMAIL/PASSWORD (default owner Newsem), SMOKE_OTHER_EMAIL/PASSWORD (default sari).
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { API, call, login, check, done } from './lib.mjs';
+import { extractRoutes } from './routes.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src');
-
-// ── 1. Ekstrak rute dari controller ─────────────────────────────────────────
-function walk(dir, out = []) {
-  for (const name of readdirSync(dir)) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) walk(p, out);
-    else if (name.endsWith('.controller.ts')) out.push(p);
-  }
-  return out;
-}
-
-function extractRoutes() {
-  const routes = [];
-  for (const file of walk(join(root, 'modules'))) {
-    const src = readFileSync(file, 'utf8');
-    const prefixMatch = src.match(/@Controller\(\s*(?:'([^']*)')?\s*\)/);
-    const prefix = prefixMatch?.[1] ?? '';
-    const lines = src.split(/\r?\n/);
-    let pending = null;
-    let isPublic = false;
-    for (const line of lines) {
-      const verb = line.match(/^\s*@(Get|Post|Patch|Put|Delete)\(\s*(?:'([^']*)')?\s*\)/);
-      if (/^\s*@Public\(\)/.test(line)) isPublic = true;
-      if (verb) {
-        pending = { method: verb[1].toUpperCase(), sub: verb[2] ?? '' };
-        continue;
-      }
-      // metode berikutnya (bukan decorator) menutup blok decorator
-      if (pending && /^\s*(async\s+)?[a-zA-Z_]\w*\s*\(/.test(line)) {
-        const path = '/' + [prefix, pending.sub].filter(Boolean).join('/');
-        routes.push({ ...pending, path: path.replace(/\/+/g, '/'), isPublic, file });
-        pending = null;
-        isPublic = false;
-      }
-      if (pending === null && /^\s*(async\s+)?[a-zA-Z_]\w*\s*\(/.test(line)) isPublic = false;
-    }
-  }
-  return routes;
-}
-
+// ── 1. Rute dibaca dari source controller (lihat routes.mjs) ───────────────
 const routes = extractRoutes().filter((r) => !r.isPublic);
 const SKIP = [/^\/auth\//, /^\/ai\/chat/, /^\/ocr\/(scan|parse)/];
 const testable = routes.filter((r) => !SKIP.some((re) => re.test(r.path)));
@@ -193,6 +151,8 @@ for (const r of paramRoutes) {
       else idor.bad.push(line);
     } else if (res.status >= 500) {
       idor.bad.push(`${r.method} ${path} -> ${res.status} (5xx)`);
+    } else if (res.status === 429) {
+      idor.bad.push(`${r.method} ${r.path} -> 429 (kena throttle; jalankan server dengan THROTTLE_LIMIT=100000)`);
     } else if (res.status === 400) {
       if (process.env.SHOW400) console.log('   400', r.method, r.path, JSON.stringify(res.body?.message)?.slice(0, 120));
       idor.inconclusive400++;

@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { defaultCompanyId } from '../../common/utils/default-company';
+import { isUniqueViolation } from '../inventory/tx-retry';
 import { ONBOARDING_TASKS, assertStageMove, summarizePipeline } from './recruitment-stage';
 
 /**
@@ -18,6 +19,7 @@ export class RecruitmentService {
   async listPostings(tenantId: string, status?: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.jobPosting.findMany({
+      take: 500,
       where: { tenantId, companyId, ...(status ? { status: status as never } : {}) },
       include: {
         department: { select: { name: true } },
@@ -39,8 +41,22 @@ export class RecruitmentService {
     openings?: number;
   }) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
+    // null/angka ekstrem dari klien: kolom gaji Decimal(18,2); di luar batas = 400, bukan error DB.
+    for (const [label, v] of [['minimum', dto.salaryMin], ['maksimum', dto.salaryMax]] as const) {
+      if (v !== undefined && v !== null && (!Number.isFinite(v) || v < 0 || v > 999_999_999_999)) {
+        throw new BadRequestException(`Gaji ${label} harus 0 sampai 999.999.999.999.`);
+      }
+    }
     if (dto.salaryMin && dto.salaryMax && dto.salaryMax < dto.salaryMin) {
       throw new BadRequestException('Gaji maksimum tidak boleh lebih kecil dari minimum.');
+    }
+    if (dto.departmentId) {
+      const dep = await this.prisma.department.findFirst({ where: { id: dto.departmentId, tenantId, companyId }, select: { id: true } });
+      if (!dep) throw new NotFoundException('Departemen tidak ditemukan.');
+    }
+    if (dto.positionId) {
+      const pos = await this.prisma.position.findFirst({ where: { id: dto.positionId, tenantId, companyId }, select: { id: true } });
+      if (!pos) throw new NotFoundException('Jabatan tidak ditemukan.');
     }
     return this.prisma.jobPosting.create({
       data: {
@@ -51,8 +67,8 @@ export class RecruitmentService {
         positionId: dto.positionId ?? null,
         description: dto.description ?? '',
         employmentType: dto.employmentType ?? 'full_time',
-        salaryMin: dto.salaryMin !== undefined ? new Prisma.Decimal(dto.salaryMin) : null,
-        salaryMax: dto.salaryMax !== undefined ? new Prisma.Decimal(dto.salaryMax) : null,
+        salaryMin: dto.salaryMin != null ? new Prisma.Decimal(dto.salaryMin) : null,
+        salaryMax: dto.salaryMax != null ? new Prisma.Decimal(dto.salaryMax) : null,
         openings: dto.openings ?? 1,
         status: 'open',
       },
@@ -69,6 +85,7 @@ export class RecruitmentService {
   async listApplicants(tenantId: string, jobPostingId?: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.applicant.findMany({
+      take: 500,
       where: { tenantId, companyId, ...(jobPostingId ? { jobPostingId } : {}) },
       include: { jobPosting: { select: { title: true, id: true } } },
       orderBy: { appliedAt: 'desc' },
@@ -119,10 +136,13 @@ export class RecruitmentService {
     if (!applicant) throw new NotFoundException('Pelamar tidak ditemukan.');
     assertStageMove(applicant.stage, stage, note);
 
-    return this.prisma.applicant.update({
-      where: { id: applicantId },
+    // Klaim bersyarat pada tahap asal: dua pemindahan bersamaan tidak saling menimpa.
+    const claimed = await this.prisma.applicant.updateMany({
+      where: { id: applicantId, tenantId, companyId, stage: applicant.stage },
       data: { stage: stage as never, rejectReason: stage === 'rejected' ? (note ?? '') : applicant.rejectReason },
     });
+    if (claimed.count !== 1) throw new ConflictException('Tahap pelamar baru saja diubah oleh permintaan lain.');
+    return this.prisma.applicant.findUniqueOrThrow({ where: { id: applicantId } });
   }
 
   /**
@@ -148,7 +168,8 @@ export class RecruitmentService {
     if (Number.isNaN(hireDate.getTime())) throw new BadRequestException('Tanggal masuk tidak valid.');
     const employeeNo = await this.nextEmployeeNo(tenantId, companyId);
 
-    return this.prisma.$transaction(async (tx) => {
+    try {
+    return await this.prisma.$transaction(async (tx) => {
       // Klaim atomik: dua permintaan hire bersamaan tidak boleh sama-sama lolos dan
       // membuat dua Employee untuk satu pelamar.
       const claimed = await tx.applicant.updateMany({
@@ -159,6 +180,9 @@ export class RecruitmentService {
 
       let userId: string | null = null;
       if (opts.createUser) {
+        // roleId adalah FK ke peran tenant; string kosong membuat hire gagal 500. 'staff' = akses terendah.
+        const role = await tx.accessRole.findFirst({ where: { tenantId, key: 'staff' }, select: { id: true } });
+        if (!role) throw new BadRequestException('Peran "staff" belum dikonfigurasi pada tenant ini.');
         const user = await tx.user.create({
           data: {
             tenantId,
@@ -166,7 +190,7 @@ export class RecruitmentService {
             email: applicant.email,
             passwordHash: '!pending-invite',
             role: 'staff',
-            roleId: '',
+            roleId: role.id,
           },
         });
         userId = user.id;
@@ -209,6 +233,12 @@ export class RecruitmentService {
         onboardingTasks: [...ONBOARDING_TASKS],
       };
     });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictException('Email pelamar sudah dipakai akun lain atau nomor employee bentrok; hire dibatalkan.');
+      }
+      throw error;
+    }
   }
 
   async completeOnboarding(tenantId: string, applicantId: string) {

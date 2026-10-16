@@ -38,10 +38,11 @@ export function isUniqueViolation(error: unknown): boolean {
 
 /** Kunci advisory per-transaksi: serialisasi proses "cek lalu buat" yang tidak punya unique constraint. */
 export async function advisoryLock(
-  tx: Pick<Prisma.TransactionClient, '$queryRaw'>,
+  tx: Pick<Prisma.TransactionClient, '$executeRaw'>,
   key: string,
 ): Promise<void> {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+  // void-returning function: $queryRaw gagal mendeserialisasi kolom void, jadi pakai $executeRaw.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
 }
 
 /** Pelanggaran FK (P2003): data masih dipakai dokumen lain. */

@@ -27,7 +27,7 @@ function ReportMini() {
     <Card className="overflow-hidden">
       <div className="bg-chartreuse px-3.5 py-3">
         <p className="text-caption text-[#1c1c1c]">Laporan</p>
-        <p className="text-[15px] text-[#1c1c1c] leading-tight font-medium">Penjualan 14 Hari</p>
+        <p className="text-[15px] text-[#1c1c1c] leading-tight font-medium">Laba Rugi Oktober</p>
       </div>
       <div className="p-3.5 flex items-end gap-1 h-16">
         {[45, 70, 52, 88, 62, 95].map((h, i) => (
@@ -51,21 +51,19 @@ function AiChatMini() {
       </div>
       <div className="mt-2 rounded-lg border border-ash bg-bone p-3">
         <Badge variant="accent" icon="assistant">AI</Badge>
-        <p className="text-caption text-ink mt-1.5">Penjualan hari ini Rp 412.000 — naik 12% dari rata-rata mingguan.</p>
+        <p className="text-caption text-ink mt-1.5">Penjualan hari ini Rp 412.000, naik 12% dari rata-rata mingguan.</p>
       </div>
     </Card>
   );
 }
 
-function StockMini() {
+function ApprovalMini() {
   return (
     <Card className="p-3.5">
-      <Badge variant="accent">Menipis</Badge>
-      <p className="text-body-sm text-ink mt-2">Croissant Mentega</p>
-      <p className="text-caption text-fossil">Sisa 6 · Gudang Kemang</p>
-      <div className="mt-2.5 h-1 rounded-full bg-sand overflow-hidden">
-        <div className="h-full w-[20%] bg-ink rounded-full" />
-      </div>
+      <Badge variant="accent">Menunggu persetujuan</Badge>
+      <p className="text-body-sm text-ink mt-2">PO-2026-00042</p>
+      <p className="text-caption text-fossil">CV Dairy Fresh · Rp 3.200.000</p>
+      <div className="mt-2.5 rounded-lg bg-ink text-paper text-caption text-center py-1.5">Setujui</div>
     </Card>
   );
 }
@@ -152,14 +150,15 @@ export function Hero() {
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-ash bg-paper/80 text-[13px] text-fossil mb-6">
                 <span className="h-2 w-2 rounded-full bg-chartreuse animate-pulse" />
-                POS Offline-first & AI Intelligence
+                ERP untuk UKM, bisa dipakai dari HP
               </div>
               <h1 className="font-light text-ink text-[36px] sm:text-[50px] leading-[1.03] tracking-[-1.8px] sm:tracking-[-2.8px] lg:text-display-lg">
-                Kelola bisnis secepat perubahannya.
+                Jalankan seluruh bisnismu dari satu aplikasi.
               </h1>
               <p className="mt-5 sm:mt-6 text-[16px] sm:text-[18px] text-fossil max-w-md leading-relaxed">
-                Retalio menyatukan POS offline-first, inventori real-time, laporan keuangan, dan AI assistant
-                dalam satu PWA — kapabilitas korporat, semudah aplikasi konsumen.
+                Retalio menyatukan kasir, stok, pembelian, produksi, penggajian, dan pembukuan. Penjualan,
+                penerimaan barang, dan gaji langsung tercatat sebagai jurnal, jadi laporan keuangan tidak perlu
+                direkap manual.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Button size="lg" iconRight="arrow-right" onClick={() => navigate('/onboarding')}>
@@ -188,7 +187,7 @@ export function Hero() {
               <div className="hero-float-up transition-transform duration-300 hover:scale-[1.02]"><PosMini /></div>
               <div className="hero-float-down translate-y-3 sm:translate-y-6 transition-transform duration-300 hover:scale-[1.02]"><ReportMini /></div>
               <div className="hero-float-up transition-transform duration-300 hover:scale-[1.02]"><AiChatMini /></div>
-              <div className="hero-float-down translate-y-3 sm:translate-y-6 transition-transform duration-300 hover:scale-[1.02]"><StockMini /></div>
+              <div className="hero-float-down translate-y-3 sm:translate-y-6 transition-transform duration-300 hover:scale-[1.02]"><ApprovalMini /></div>
               <div className="col-span-2 hero-float-up transition-transform duration-300 hover:scale-[1.01]"><StatMini /></div>
             </div>
           </Reveal>

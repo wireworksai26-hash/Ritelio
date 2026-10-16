@@ -87,6 +87,11 @@ export default defineConfig({
     port: 5173,
     allowedHosts: true,
   },
+  // `vite preview` dipakai melayani build di Railway: harus mendengarkan semua interface dan menerima host publik.
+  preview: {
+    host: true,
+    allowedHosts: true,
+  },
   plugins: [
     localSyncPlugin(),
     react(),
@@ -95,10 +100,10 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'fonts/*.woff2'],
       manifest: {
-        name: 'Retalio — Smart Business System',
+        name: 'Retalio ERP',
         short_name: 'Retalio',
         description:
-          'Sistem operasional bisnis pintar untuk SMB: POS, inventori, keuangan, dan AI assistant dalam satu PWA.',
+          'ERP untuk UKM: kasir, inventori, akuntansi, pengadaan, manufaktur, SDM, dan asisten AI dalam satu PWA.',
         lang: 'id',
         theme_color: '#f5f4f0',
         background_color: '#f5f4f0',

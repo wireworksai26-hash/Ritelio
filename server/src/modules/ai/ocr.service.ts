@@ -1,8 +1,8 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { defaultCompanyId } from '../../common/utils/default-company';
-import { NimService } from '../ai/nim.service';
+import { NimNotConfiguredError, NimService } from '../ai/nim.service';
 import { roundMoney } from '../../common/utils/money';
 import type { CreateBillDto } from '../payables/dto/payable.dto';
 import { PayablesService } from '../payables/payables.service';
@@ -79,13 +79,21 @@ export class OcrService {
         },
       });
     } catch (error) {
-      return this.prisma.ocrResult.update({
+      const failed = await this.prisma.ocrResult.update({
         where: { id: record.id },
         data: {
           status: 'failed',
           error: error instanceof Error ? error.message.slice(0, 500) : 'Kesalahan tidak diketahui',
         },
       });
+      // Layanan OCR memang belum dipasang: itu kegagalan layanan (503) dengan pesan
+      // yang jelas, bukan "berhasil" 201 berisi baris gagal yang mudah terlewat.
+      if (error instanceof NimNotConfiguredError) {
+        throw new ServiceUnavailableException(
+          'Layanan OCR belum dikonfigurasi (NIM_API_KEY kosong). Hubungi admin untuk mengaktifkannya; berkas dicatat sebagai gagal (id ' + failed.id + ').',
+        );
+      }
+      return failed;
     }
   }
 

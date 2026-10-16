@@ -4,7 +4,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
-  IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -65,6 +65,6 @@ export class ListStockOpQueryDto {
   warehouseId?: string;
 
   @IsOptional()
-  @IsEnum(OP_STATUSES)
+  @IsIn(OP_STATUSES)
   status?: (typeof OP_STATUSES)[number];
 }

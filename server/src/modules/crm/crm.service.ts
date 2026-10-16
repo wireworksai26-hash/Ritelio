@@ -73,6 +73,7 @@ export class CrmService {
     return this.prisma.$transaction(async (tx) =>
       this.companyOf(tx, tenantId).then((companyId) =>
         tx.lead.findMany({
+      take: 500,
           where: { tenantId, companyId },
           include: {
             customer: { select: { id: true, code: true, name: true } },
@@ -195,6 +196,7 @@ export class CrmService {
   async listOpportunities(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.opportunity.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: {
         customer: { select: { id: true, code: true, name: true } },
@@ -330,6 +332,7 @@ export class CrmService {
   async listQuotations(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.quotation.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: {
         customer: { select: { id: true, code: true, name: true } },
@@ -488,6 +491,7 @@ if (!quotation.customerId) throw new BadRequestException('Penawaran tidak punya 
   async listSalesOrders(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.salesOrder.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: {
         customer: { select: { id: true, code: true, name: true } },
@@ -786,6 +790,7 @@ if (!quotation.customerId) throw new BadRequestException('Penawaran tidak punya 
   listComplaints(tenantId: string) {
     return this.companyOf(this.prisma, tenantId).then((companyId) =>
       this.prisma.customerComplaint.findMany({
+      take: 500,
         where: { tenantId, companyId },
         include: { customer: { select: { code: true, name: true } } },
         orderBy: { createdAt: 'desc' },

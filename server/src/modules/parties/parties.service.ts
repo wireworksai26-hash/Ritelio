@@ -23,6 +23,7 @@ export class PartyService {
   async listSuppliers(tenantId: string, query: ListPartyQueryDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.supplier.findMany({
+      take: 500,
       where: {
         tenantId,
         companyId,
@@ -43,6 +44,7 @@ export class PartyService {
   async listCustomers(tenantId: string, query: ListPartyQueryDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.customer.findMany({
+      take: 500,
       where: {
         tenantId,
         companyId,
@@ -112,15 +114,14 @@ export class PartyService {
 
   async updateSupplier(tenantId: string, id: string, dto: UpdatePartyDto) {
     const { companyId } = await this.assertSupplier(tenantId, id);
-    return this.prisma.supplier.update({
-      where: { id },
-      data: this.partyData(dto, companyId),
-    });
+    const data = this.partyData(dto, companyId);
+    return this.prisma.supplier.update({ where: { id }, data }).catch((error) => this.rethrowDuplicate(error, 'kode pemasok'));
   }
 
   async updateCustomer(tenantId: string, id: string, dto: UpdatePartyDto) {
     await this.assertCustomer(tenantId, id);
-    return this.prisma.customer.update({ where: { id }, data: this.partyData(dto) });
+    const data = this.partyData(dto);
+    return this.prisma.customer.update({ where: { id }, data }).catch((error) => this.rethrowDuplicate(error, 'kode pelanggan'));
   }
 
   /**
@@ -168,16 +169,21 @@ export class PartyService {
 
   private partyData(dto: UpdatePartyDto, companyId?: string) {
     const data: Record<string, unknown> = {};
+    // DTO memperbolehkan null pada field opsional; kode & nama tidak boleh dikosongkan,
+    // field teks lain kosong = '' (kolom NOT NULL), bukan null yang membuat query gagal 500.
+    if (dto.code === null || dto.name === null) {
+      throw new BadRequestException('Kode dan nama tidak boleh dikosongkan.');
+    }
     if (dto.code !== undefined) data.code = dto.code.trim().toUpperCase();
     if (dto.name !== undefined) data.name = dto.name.trim();
-    if (dto.contact !== undefined) data.contact = dto.contact;
-    if (dto.email !== undefined) data.email = dto.email;
-    if (dto.phone !== undefined) data.phone = dto.phone;
+    if (dto.contact !== undefined) data.contact = dto.contact ?? '';
+    if (dto.email !== undefined) data.email = dto.email ?? '';
+    if (dto.phone !== undefined) data.phone = dto.phone ?? '';
     if (dto.taxId !== undefined) data.taxId = dto.taxId || null;
-    if (dto.address !== undefined) data.address = dto.address;
-    if (dto.city !== undefined) data.city = dto.city;
-    if (dto.paymentTermDays !== undefined) data.paymentTermDays = dto.paymentTermDays;
-    if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    if (dto.address !== undefined) data.address = dto.address ?? '';
+    if (dto.city !== undefined) data.city = dto.city ?? '';
+    if (dto.paymentTermDays !== undefined && dto.paymentTermDays !== null) data.paymentTermDays = dto.paymentTermDays;
+    if (dto.isActive !== undefined && dto.isActive !== null) data.isActive = dto.isActive;
     if (dto.creditLimit !== undefined) {
       data.creditLimit = dto.creditLimit === null ? null : new Prisma.Decimal(dto.creditLimit);
     }

@@ -35,8 +35,6 @@ async function journalsOf(sourceModule, token = T) {
   } while (cursor);
   return out;
 }
-const journalById = async (id) => (await call(T, 'GET', '/journals?take=200')).body.data.find((j) => j.id === id)
-  ?? (await journalsOf('manual')).find((j) => j.id === id);
 async function gl(code, token = T, accounts = A) {
   const r = await call(token, 'GET', `/finance/reports/general-ledger/${accounts[code]}?asOf=${ASOF}`);
   return r.body.closingBalance;
@@ -353,6 +351,7 @@ const assetOf = async (id, token = T) => (await call(token, 'GET', `/assets/${id
 const depJournals = async (assetId) => (await journalsOf('assets')).filter((j) => j.sourceRefId === assetId && j.memo.startsWith('Penyusutan'));
 is('run tanpa periodId/periodCode ditolak 400', await call(T, 'POST', '/assets/depreciation/run', {}), 400);
 is('run periode fiktif -> 404', await depRun('2099-01'), 404);
+is('run periode yang belum dimulai (2026-12) ditolak 400', await depRun('2026-12'), 400);
 is('run ke periode tertutup ditolak 400', await depRun('2026-02'), 400);
 
 const dr1 = await depRun('2026-04');
@@ -407,10 +406,11 @@ is('dispose ke periode tertutup ditolak 400', await call(T, 'POST', `/assets/${f
 check('aset tetap active setelah dispose ditolak', (await assetOf(fa1.body.id)).status !== 'disposed');
 const dis1 = await call(T, 'POST', `/assets/${fa1.body.id}/dispose`, { proceeds: 10000000, disposalDate: '2026-10-09' });
 is('dispose FA-001 (laba) -> 2xx', dis1, 200, 201);
-check('laba = proceeds - nilai buku = 10.000.000 - 9.150.000 = 850.000', near(dis1.body.gainLoss, 850000) && near(dis1.body.bookValue, 9150000), short(dis1));
+// FA-001 disusutkan Apr, Mei, Agu, Sep = 4 x 950.000 = 3.800.000 -> nilai buku 8.200.000
+check('laba = proceeds - nilai buku = 10.000.000 - 8.200.000 = 1.800.000', near(dis1.body.gainLoss, 1800000) && near(dis1.body.bookValue, 8200000), short(dis1));
 {
   const j = (await journalsOf('assets')).find((x) => x.id === dis1.body.journalId);
-  check('jurnal dispose seimbang: Dr Kas 10jt + Dr Akum 2,85jt = Cr Aset 12jt + Cr Pendapatan 850rb', j && balanced(j) && near(sumLines(j, 'debit'), 12850000) && near(lineOf(j, '4000', 'credit')?.amount, 850000), j && json(j.lines.map((l) => [l.direction, l.amount])));
+  check('jurnal dispose seimbang: Dr Kas 10jt + Dr Akum 3,8jt = Cr Aset 12jt + Cr Pendapatan 1,8jt', j && balanced(j) && near(sumLines(j, 'debit'), 13800000) && near(lineOf(j, '4000', 'credit')?.amount, 1800000), j && json(j.lines.map((l) => [l.direction, l.amount])));
   const a = await assetOf(fa1.body.id);
   check('FA-001 status disposed, disposedAt = tanggal dispose', a.status === 'disposed' && a.disposedAt?.slice(0, 10) === '2026-10-09', json([a.status, a.disposedAt]));
 }
@@ -420,14 +420,15 @@ is('dispose ulang ditolak 400', await call(T, 'POST', `/assets/${fa1.body.id}/di
   const beforeJ = (await depJournals(fa1.body.id)).length;
   await depRun('2026-10');
   const a = await assetOf(fa1.body.id);
-  check('aset disposed tidak disusutkan lagi', a.schedules.length === before && near(a.accumulatedDepreciation, 2850000) && (await depJournals(fa1.body.id)).length === beforeJ, json([a.schedules.length, a.accumulatedDepreciation]));
+  check('aset disposed tidak disusutkan lagi', a.schedules.length === before && near(a.accumulatedDepreciation, 3800000) && (await depJournals(fa1.body.id)).length === beforeJ, json([a.schedules.length, a.accumulatedDepreciation]));
 }
 const dis2 = await call(T, 'POST', `/assets/${faEarly.body.id}/dispose`, { proceeds: 500000, disposalDate: '2026-10-09' });
 is('dispose FA-EARLY (rugi) -> 2xx', dis2, 200, 201);
-check('rugi = 500.000 - 1.100.000 = -600.000', near(dis2.body.gainLoss, -600000), short(dis2));
+// FA-EARLY: disusutkan Sep + Okt = 200.000 -> nilai buku 1.000.000
+check('rugi = 500.000 - 1.000.000 = -500.000', near(dis2.body.gainLoss, -500000), short(dis2));
 {
   const j = (await journalsOf('assets')).find((x) => x.id === dis2.body.journalId);
-  check('jurnal rugi seimbang: Dr 5000 600.000', j && balanced(j) && near(lineOf(j, '5000', 'debit')?.amount, 600000), j && json(j.lines.map((l) => [l.direction, l.amount])));
+  check('jurnal rugi seimbang: Dr 5000 500.000', j && balanced(j) && near(lineOf(j, '5000', 'debit')?.amount, 500000), j && json(j.lines.map((l) => [l.direction, l.amount])));
 }
 // Dispose paralel pada aset yang sama
 const disPar = await Promise.all([1, 2, 3].map(() => call(T, 'POST', `/assets/${faDb.body.id}/dispose`, { proceeds: 9000000, disposalDate: '2026-10-09' })));

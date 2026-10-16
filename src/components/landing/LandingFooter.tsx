@@ -12,10 +12,10 @@ const COLUMNS: Array<{ title: string; links: Array<{ label: string; href?: strin
     title: 'PRODUK',
     links: [
       { label: 'Harga', href: '#harga' },
-      { label: 'POS Offline' },
-      { label: 'Inventori' },
-      { label: 'Keuangan' },
-      { label: 'Retalio Intelligence' },
+      { label: 'Semua modul', href: '#modul' },
+      { label: 'Kasir & POS', href: '#fitur' },
+      { label: 'Keuangan & Akuntansi', href: '#modul' },
+      { label: 'Retalio Intelligence', href: '#fitur' },
     ],
   },
   {
@@ -95,7 +95,7 @@ export function LandingFooter() {
 
       <div className="border-t border-ash">
         <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8 py-5 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-caption text-fossil">
-          <span>© 2026 Retalio — Smart Business System</span>
+          <span>© 2026 Retalio ERP</span>
           <span className="flex flex-wrap gap-x-5 gap-y-1">
             <a href="#" onClick={(e) => e.preventDefault()} className="hover:text-ink transition-colors">Privasi</a>
             <a href="#" onClick={(e) => e.preventDefault()} className="hover:text-ink transition-colors">Syarat &amp; Ketentuan</a>

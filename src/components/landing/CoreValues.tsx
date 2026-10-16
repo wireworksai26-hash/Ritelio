@@ -6,28 +6,28 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Icon, type IconName } from '../icons/Icon';
-import { Toggle } from '../ui/Toggle';
 
 const AUTOPLAY_MS = 6000;
 
-function ModularVisual() {
-  const mods = [
-    ['Kasir & POS', true],
-    ['Kontrol Inventori', true],
-    ['Produksi', false],
-  ] as const;
+function RolesVisual() {
+  const roles: Array<[string, string]> = [
+    ['Kasir', 'Kasir, Notifikasi'],
+    ['Staff gudang', 'Inventori, Notifikasi'],
+    ['Manajer', 'Penjualan, Gudang, Pengadaan, Manufaktur'],
+    ['Owner', 'Semua modul'],
+  ];
   return (
     <Card className="w-full max-w-sm p-5">
-      <p className="text-caption text-fossil">Manajemen Modul</p>
-      <div className="mt-3 space-y-3">
-        {mods.map(([label, on]) => (
-          <div key={label} className="flex items-center justify-between">
-            <span className="text-body-sm text-ink">{label}</span>
-            <Toggle checked={on} onChange={() => {}} label={label} />
+      <p className="text-caption text-fossil">Menu yang terlihat per peran</p>
+      <div className="mt-3 space-y-2.5">
+        {roles.map(([role, menus]) => (
+          <div key={role} className="rounded-lg border border-ash bg-paper px-3.5 py-2.5">
+            <p className="text-body-sm text-ink">{role}</p>
+            <p className="text-caption text-fossil">{menus}</p>
           </div>
         ))}
       </div>
-      <p className="mt-4 text-caption text-fossil">Data tidak pernah terhapus saat modul nonaktif.</p>
+      <p className="mt-4 text-caption text-fossil">Server menolak akses di luar peran, bukan hanya menyembunyikan menunya.</p>
     </Card>
   );
 }
@@ -57,10 +57,10 @@ function OfflineVisual() {
 
 function SingleSourceVisual() {
   const flow: Array<[IconName, string]> = [
-    ['pos', 'POS mencatat'],
-    ['inventory', 'Stok berkurang'],
+    ['pos', 'Transaksi dicatat'],
+    ['inventory', 'Stok bergerak'],
     ['finance', 'Jurnal terbentuk'],
-    ['assistant', 'AI menganalisis'],
+    ['chart', 'Laporan terisi'],
   ];
   return (
     <Card className="w-full max-w-lg p-6">
@@ -92,8 +92,8 @@ function ExplainableAiVisual() {
         Berdasarkan: inventory_stock:stk-6 · stock_movements:14 hari
       </p>
       <div className="mt-4 flex gap-2">
-        <Button size="sm" onClick={() => toast({ title: 'Saran diterapkan (mock)', icon: 'check' })}>Terapkan</Button>
-        <Button size="sm" variant="ghost" onClick={() => toast({ title: 'Saran diabaikan', icon: 'close' })}>Abaikan</Button>
+        <Button size="sm" onClick={() => toast({ title: 'Ini contoh tampilan', description: 'Di aplikasi, saran menunggu persetujuanmu.', icon: 'info' })}>Terapkan</Button>
+        <Button size="sm" variant="ghost" onClick={() => toast({ title: 'Ini contoh tampilan', icon: 'info' })}>Abaikan</Button>
       </div>
     </Card>
   );
@@ -111,20 +111,20 @@ interface Value {
 
 const VALUES: Value[] = [
   {
-    id: 'modular',
-    label: 'Modular',
-    sub: 'Sesuai kebutuhan',
-    heading: 'Aktifkan hanya yang kamu butuhkan.',
-    body: 'Toggle modul ON/OFF tanpa developer, pilih template industri, dan tambah field kustom lewat form builder low-code. Sistem menyesuaikan bisnismu — bukan sebaliknya.',
+    id: 'peran',
+    label: 'Per Peran',
+    sub: 'Akses sesuai tugas',
+    heading: 'Setiap orang hanya melihat bagiannya.',
+    body: 'Kasir melihat kasir, staf gudang melihat stok, manajer melihat penjualan dan pengadaan, owner melihat seluruhnya. Aturan ini ditegakkan di server, jadi mengetik alamat halaman lain tidak membukanya.',
     bg: 'bg-lavender/40',
-    visual: <ModularVisual />,
+    visual: <RolesVisual />,
   },
   {
     id: 'offline',
     label: 'Offline-first',
     sub: 'Selalu bisa jualan',
-    heading: 'Internet putus, bisnis jalan terus.',
-    body: 'Fungsi kritis dirancang offline-first: transaksi tersimpan di perangkat, struk tetap tercetak, dan antrean tersinkron otomatis. Konflik ditandai untuk review — tidak pernah ditolak diam-diam.',
+    heading: 'Internet putus, kasir tetap jalan.',
+    body: 'Kasir dirancang offline-first: transaksi tersimpan di perangkat, struk tetap tercetak, dan antrean tersinkron otomatis saat online. Modul lain seperti akuntansi dan pengadaan membutuhkan koneksi.',
     bg: 'bg-sand',
     visual: <OfflineVisual />,
   },
@@ -132,8 +132,8 @@ const VALUES: Value[] = [
     id: 'single-source',
     label: 'Satu Kebenaran',
     sub: 'Tanpa rekap manual',
-    heading: 'Satu sumber kebenaran untuk semua angka.',
-    body: 'Setiap transaksi POS mengalir ke stok dan jurnal secara otomatis. Owner, kasir, dan manajer melihat angka yang sama — real-time, tanpa rekap spreadsheet malam hari.',
+    heading: 'Satu sumber untuk semua angka.',
+    body: 'Penjualan, penerimaan barang, dan penggajian menghasilkan jurnal di buku besar yang sama, dan laporan dibaca dari sana. Jurnal yang sudah diposting tidak diedit, hanya dibalik dengan jurnal pembalik.',
     bg: 'bg-paper border border-ash',
     visual: <SingleSourceVisual />,
   },
@@ -141,14 +141,14 @@ const VALUES: Value[] = [
     id: 'explainable-ai',
     label: 'AI Terjelaskan',
     sub: 'Bukan kotak hitam',
-    heading: 'AI yang bisa dijelaskan, bukan ditebak.',
-    body: 'Setiap insight menyertakan sumber datanya dan setiap rekomendasi menunggu persetujuanmu. Retalio Intelligence menyarankan — kamu yang memutuskan.',
+    heading: 'AI yang menyebut sumbernya.',
+    body: 'Setiap insight menyertakan data yang dipakai, dan setiap rekomendasi menunggu persetujuanmu. Retalio Intelligence menyarankan, kamu yang memutuskan.',
     bg: 'bg-chartreuse',
     visual: <ExplainableAiVisual />,
   },
 ];
 
-// Core values — 4 tab vertikal dengan autoplay (mirror "Versatility/Scale/Influence/AI")
+// Core values: 4 tab vertikal dengan autoplay
 export function CoreValues() {
   const [active, setActive] = useState(0);
   const navigate = useNavigate();

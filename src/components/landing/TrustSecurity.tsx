@@ -5,39 +5,39 @@ import { Card } from '../ui/Card';
 
 const ITEMS = [
   {
-    eyebrow: 'ENKRIPSI',
-    body: 'Seluruh trafik terenkripsi via TLS 1.2+ dan data tersimpan aman dengan AES-256 at-rest.',
+    eyebrow: 'AKSES PER PERAN',
+    body: 'Hak akses dijaga di server per peran dan per izin. Kasir tidak bisa membuka keuangan, walau mengetik alamatnya langsung.',
   },
   {
-    eyebrow: 'KONTROL AKSES',
-    body: 'RBAC granular per peran — kasir hanya melihat POS, owner melihat semuanya. 2FA untuk admin & owner.',
+    eyebrow: 'LOGIN & SESI',
+    body: 'Kata sandi disimpan sebagai hash. Token akses berumur pendek, token refresh dirotasi dan bisa dicabut, dan 2FA tersedia untuk akunmu.',
   },
   {
-    eyebrow: 'ISOLASI TENANT',
-    body: 'Data tiap bisnis terisolasi ketat dengan Row-Level Security di level database.',
+    eyebrow: 'DATA TERPISAH',
+    body: 'Setiap permintaan dibatasi ke bisnis pemilik akun. Perusahaan yang kamu pilih juga diperiksa kepemilikannya di server.',
   },
   {
-    eyebrow: 'AUDIT TRAIL',
-    body: 'Setiap perubahan tercatat lengkap (before/after) — jejak audit siap saat kamu butuh.',
+    eyebrow: 'JEJAK AUDIT',
+    body: 'Perubahan data tercatat lengkap: siapa, kapan, dan nilai sebelum serta sesudahnya. Kejadian login juga ikut tercatat.',
   },
   {
-    eyebrow: 'BACKUP HARIAN',
-    body: 'Backup otomatis tiap hari dengan RPO ≤ 24 jam dan pemulihan RTO ≤ 4 jam.',
+    eyebrow: 'PERIODE TERKUNCI',
+    body: 'Periode yang sudah ditutup tidak menerima jurnal baru. Kesalahan dikoreksi dengan jurnal pembalik, bukan dengan menghapus.',
   },
   {
-    eyebrow: 'KEPATUHAN LOKAL',
-    body: 'Dirancang sesuai UU PDP dan mendukung kebutuhan pajak Indonesia (e-Faktur).',
+    eyebrow: 'PAJAK SEBAGAI DATA',
+    body: 'PPN dihitung otomatis dari aturan tarif beserta riwayat versinya. Tarif PPh 21 diberi label resmi atau estimasi. Pelaporan ke DJP tetap kamu lakukan sendiri.',
   },
 ];
 
-// Trust & security — 6 card di atas wash chartreuse bermotif dot (mirror maze.co card_grid)
+// Keamanan: 6 kartu di atas wash chartreuse bermotif dot. Setiap klaim harus bisa dibuktikan dari kode.
 export function TrustSecurity() {
   return (
     <section id="keamanan" className="relative overflow-hidden bg-chartreuse py-20 lg:py-24">
       <div aria-hidden="true" className="absolute inset-0 dot-matrix opacity-40" />
       <div className="relative mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
         <Reveal className="text-center" duration={0.8} y={30}>
-          <h2 className="text-heading-lg font-light text-[#1c1c1c]">Keamanan di setiap level.</h2>
+          <h2 className="text-[30px] sm:text-heading-lg font-light text-[#1c1c1c]">Keamanan dan jejak audit.</h2>
           <div className="mt-6">
             <Button
               className="bg-[#1c1c1c] text-[#ffffff] hover:bg-black"

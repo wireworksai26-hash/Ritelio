@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma.service';
+import { LEDGER_STATUSES } from '../accounting/ledger';
 import { KNOWLEDGE_BASE, KB_FALLBACK } from './knowledge-base';
 import type { FastIntent } from './ai-router.service';
 
@@ -162,16 +163,18 @@ export class FastPathService {
       where: { tenantId, type: 'expense' },
       select: { id: true },
     });
-    const opexAgg = await this.prisma.journalLine.aggregate({
-      _sum: { amount: true },
-      where: {
-        tenantId,
-        accountId: { in: expenseAccounts.map((a) => a.id) },
-        direction: 'debit',
-        journal: { status: 'posted', entryDate: { gte: since } },
-      },
-    });
-    const opex = Number(opexAgg._sum.amount ?? 0);
+    // Neto per akun (debit - kredit) atas status yang sama dengan laporan GL, supaya jurnal
+    // yang sudah dibalik (asal `voided` + pembalik `posted`) saling meniadakan, bukan terbaca setengah.
+    const opexWhere = {
+      tenantId,
+      accountId: { in: expenseAccounts.map((a) => a.id) },
+      journal: { status: { in: LEDGER_STATUSES }, entryDate: { gte: since } },
+    };
+    const [opexDebit, opexCredit] = await Promise.all([
+      this.prisma.journalLine.aggregate({ _sum: { amount: true }, where: { ...opexWhere, direction: 'debit' } }),
+      this.prisma.journalLine.aggregate({ _sum: { amount: true }, where: { ...opexWhere, direction: 'credit' } }),
+    ]);
+    const opex = Number(opexDebit._sum.amount ?? 0) - Number(opexCredit._sum.amount ?? 0);
     const gross = revenue - cogs;
     const net = gross - opex;
     const margin = revenue > 0 ? Math.round((gross / revenue) * 100) : 0;
@@ -199,7 +202,7 @@ export class FastPathService {
                 tenantId,
                 accountId: cashAccount.id,
                 direction: 'debit',
-                journal: { status: 'posted', entryDate: { gte: day, lt: next } },
+                journal: { status: { in: LEDGER_STATUSES }, entryDate: { gte: day, lt: next } },
               },
             })
           : Promise.resolve({ _sum: { amount: null } }),
@@ -210,7 +213,7 @@ export class FastPathService {
                 tenantId,
                 accountId: cashAccount.id,
                 direction: 'credit',
-                journal: { status: 'posted', entryDate: { gte: day, lt: next } },
+                journal: { status: { in: LEDGER_STATUSES }, entryDate: { gte: day, lt: next } },
               },
             })
           : Promise.resolve({ _sum: { amount: null } }),

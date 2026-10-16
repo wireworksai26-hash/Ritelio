@@ -6,6 +6,7 @@ import { json, urlencoded } from 'express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { parseCorsOrigins } from './common/config/env.validation';
+import { RejectNulPipe } from './common/pipes/reject-nul.pipe';
 
 /** Batas body JSON umum. Cukup untuk dokumen ERP terbesar (jurnal/PO ratusan baris). */
 const JSON_LIMIT = process.env.BODY_LIMIT ?? '512kb';
@@ -23,9 +24,14 @@ async function bootstrap() {
   // Di belakang reverse proxy/load balancer: set TRUST_PROXY=1 (jumlah hop) agar req.ip
   // dan throttle memakai IP klien sebenarnya, bukan IP proxy. Header X-Forwarded-For
   // TIDAK dipercaya tanpa ini sehingga tidak bisa dipalsukan untuk menghindari throttle.
-  if (process.env.TRUST_PROXY) {
-    const hops = Number(process.env.TRUST_PROXY);
-    app.set('trust proxy', Number.isInteger(hops) ? hops : process.env.TRUST_PROXY);
+  // Railway selalu menaruh proxy di depan aplikasi. Tanpa trust proxy, semua pengunjung terlihat sebagai
+  // satu IP (milik proxy) dan berbagi satu kuota throttle/kunci login, sehingga halaman mulai gagal
+  // dimuat (429) begitu beberapa orang memakai aplikasi. Terdeteksi otomatis; TRUST_PROXY tetap menang.
+  const onRailway = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
+  const trustProxy = process.env.TRUST_PROXY ?? (onRailway ? '1' : undefined);
+  if (trustProxy) {
+    const hops = Number(trustProxy);
+    app.set('trust proxy', Number.isInteger(hops) ? hops : trustProxy);
   }
 
   app.use(helmet());
@@ -39,12 +45,18 @@ async function bootstrap() {
   // Origin sudah divalidasi saat boot (env.validation): tanpa wildcard, dan wajib
   // eksplisit di produksi. Default dev hanya Vite lokal.
   const origins = parseCorsOrigins(process.env.CORS_ORIGIN);
-  app.enableCors({
-    origin: origins.length > 0 ? origins : ['http://localhost:5173'],
-    credentials: true,
-  });
+  // Default dev: Vite dev (5173) dan `vite preview` (4173), lewat localhost maupun 127.0.0.1.
+  const DEV_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:4173',
+    'http://127.0.0.1:4173',
+  ];
+  const allowedOrigins = origins.length > 0 ? origins : DEV_ORIGINS;
+  app.enableCors({ origin: allowedOrigins, credentials: true });
   app.setGlobalPrefix('v1');
   app.useGlobalPipes(
+    new RejectNulPipe(),
     new ValidationPipe({
       // whitelist membuang property tak dikenal agar tidak bisa sampai ke service
       // lewat body. forbidNonWhitelisted sengaja TIDAK diaktifkan: client POS
@@ -60,6 +72,10 @@ async function bootstrap() {
   const port = Number(process.env.PORT ?? 4000);
   await app.listen(port);
   console.log(`Retalio API berjalan di http://localhost:${port}/v1`);
+  // Ringkasan konfigurasi untuk diagnosis di log deploy. Tidak berisi rahasia.
+  console.log(
+    `[config] NODE_ENV=${process.env.NODE_ENV ?? '(kosong)'} | trust proxy=${trustProxy ?? 'mati'} | CORS origin=${allowedOrigins.join(', ')}`,
+  );
 }
 
 bootstrap();

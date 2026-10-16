@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -18,13 +19,26 @@ import type {
   CreatePositionDto,
   DecideLeaveDto,
 } from './dto/hr.dto';
+import { ensureAccount, type AccountSpec } from '../inventory/inventory-adjustment';
+import { isUniqueViolation } from '../inventory/tx-retry';
 import { computePph21 } from './pph21';
+import {
+  ANNUAL_LEAVE_QUOTA,
+  businessDate,
+  countWorkingDays,
+  lateMinutesAt,
+  prorateFactorFor,
+  workedAndOvertime,
+  workingDaysInYear,
+} from './work-time';
 
 const SALARY_ACCOUNT = '6300';
 // Utang PPh 21 =liability. Jangan tertukar dengan 2150 (Piutang PPN) yang
 // bertipe aset — memakai nomor yang salah membuat jurnal tidak seimbang.
 const PPH21_PAYABLE = '2160';
 const SOCIAL_PAYABLE = '2200';
+/** Kewajiban gaji ke karyawan; COA seed tidak punya akun ini, jadi dibuat saat dibutuhkan. */
+const WAGES_PAYABLE_ACCOUNT: AccountSpec = { code: '2300', name: 'Utang Gaji', type: 'liability' };
 
 interface PayrollOverrideShape {
   overtimeAmount: number;
@@ -54,6 +68,7 @@ export class HrmService {
   async listDepartments(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.department.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: { _count: { select: { employees: true } } },
       orderBy: { code: 'asc' },
@@ -105,9 +120,9 @@ export class HrmService {
   }
 
   /**
-   * Absen masuk. `overtimeHours` dihitung dari selisih jam kerja dengan
-   * durasi standar, bukan diisi manual — kolom lama tidak pernah diisi karena
-   * tidak ada endpoint yang bisa menghitungnya.
+   * Absen masuk. Tanggal kerja & keterlambatan dihitung pada zona WIB (lihat
+   * work-time.ts) dan keterlambatan DISIMPAN saat masuk, supaya tidak hilang/tertimpa
+   * saat absen pulang.
    */
   async clockIn(tenantId: string, employeeId: string, at?: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
@@ -123,44 +138,58 @@ export class HrmService {
       throw new BadRequestException('Waktu absen tidak boleh di masa depan.');
     }
 
-    const day = startOfUtcDay(now);
-    const existing = await this.prisma.attendance.findFirst({
-      where: { tenantId, employeeId, date: day },
-    });
-    if (existing?.checkIn) {
-      throw new ConflictException(`Anda sudah absen masuk hari ini pukul ${formatTime(existing.checkIn)}.`);
+    const day = businessDate(now);
+    const late = lateMinutesAt(now);
+    let row;
+    try {
+      const existing = await this.prisma.attendance.findFirst({
+        where: { tenantId, employeeId, date: day },
+      });
+      if (existing?.checkIn) {
+        throw new ConflictException(`Anda sudah absen masuk hari ini pukul ${formatTime(existing.checkIn)}.`);
+      }
+      row = existing
+        ? await this.prisma.attendance.update({
+            where: { id: existing.id },
+            data: { checkIn: now, status: 'present', lateMinutes: late },
+          })
+        : await this.prisma.attendance.create({
+            data: { tenantId, companyId, employeeId, date: day, checkIn: now, status: 'present', lateMinutes: late },
+          });
+    } catch (error) {
+      // Dua absen masuk bersamaan: unique (karyawan, tanggal) menahan yang kedua.
+      if (isUniqueViolation(error)) throw new ConflictException('Anda sudah absen masuk hari ini.');
+      throw error;
     }
-
-    const row = existing
-      ? await this.prisma.attendance.update({
-          where: { id: existing.id },
-          data: { checkIn: now, status: 'present' },
-        })
-      : await this.prisma.attendance.create({
-          data: { tenantId, companyId, employeeId, date: day, checkIn: now, status: 'present' },
-        });
 
     return {
       id: row.id,
       employeeNo: employee.employeeNo,
       date: day.toISOString().slice(0, 10),
       checkIn: row.checkIn,
-      lateMinutes: minutesLate(now),
-      message: minutesLate(now) > 0 ? 'Terlambat tercatat.' : 'Absen masuk tercatat.',
+      lateMinutes: late,
+      message: late > 0 ? 'Terlambat tercatat.' : 'Absen masuk tercatat.',
     };
   }
 
   /**
    * Absen pulang. Durasi kerja dihitung di sini; lembur = durasi kerja
    * dikurangi jam standar, dibatasi 4 jam per hari sesuai praktik umum.
+   * Klaim bersyarat (checkOut masih kosong) menolak absen pulang ganda.
    */
   async clockOut(tenantId: string, employeeId: string, at?: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     const now = at ? new Date(at) : new Date();
-    const day = startOfUtcDay(now);
+    if (Number.isNaN(now.getTime())) throw new BadRequestException('Waktu absen tidak valid.');
+    if (now.getTime() > Date.now() + 60_000) {
+      throw new BadRequestException('Waktu absen tidak boleh di masa depan.');
+    }
+    const day = businessDate(now);
+    // Employee harus milik tenant ini: tanpa cek, id asing dijawab "belum absen" (400) alih-alih 404.
+    await this.assertEmployee(tenantId, companyId, employeeId);
 
     const row = await this.prisma.attendance.findFirst({
-      where: { tenantId, employeeId, date: day },
+      where: { tenantId, companyId, employeeId, date: day },
     });
     if (!row?.checkIn) {
       throw new BadRequestException('Belum ada absen masuk hari ini.');
@@ -169,21 +198,19 @@ export class HrmService {
       throw new ConflictException(`Anda sudah absen pulang pukul ${formatTime(row.checkOut)}.`);
     }
 
-    const workedHours = (now.getTime() - new Date(row.checkIn).getTime()) / 3_600_000;
-    if (workedHours < 0) throw new BadRequestException('Waktu pulang sebelum waktu masuk.');
-    // Lembur dihitung dari durasi kerja dikurangi jam standar kerja.
-    const overtime = Math.min(Math.max(workedHours - STANDARD_WORK_HOURS, 0), MAX_DAILY_OVERTIME);
-    const lateMinutes = Math.max(Math.round((workedHours - STANDARD_WORK_HOURS) * -60), 0);
+    const { worked, overtime } = workedAndOvertime(new Date(row.checkIn), now);
+    if (worked < 0) throw new BadRequestException('Waktu pulang sebelum waktu masuk.');
 
-    const updated = await this.prisma.attendance.update({
-      where: { id: row.id },
+    const claimed = await this.prisma.attendance.updateMany({
+      where: { id: row.id, checkOut: null },
       data: {
         checkOut: now,
-        workedHours: new Prisma.Decimal(roundMoney(workedHours)),
+        workedHours: new Prisma.Decimal(roundMoney(worked)),
         overtimeHours: new Prisma.Decimal(roundMoney(overtime)),
-        lateMinutes,
       },
     });
+    if (claimed.count !== 1) throw new ConflictException('Anda sudah absen pulang.');
+    const updated = await this.prisma.attendance.findUniqueOrThrow({ where: { id: row.id } });
 
     return {
       id: updated.id,
@@ -199,6 +226,7 @@ export class HrmService {
   async listPositions(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.position.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: { department: { select: { id: true, code: true, name: true } } },
       orderBy: { code: 'asc' },
@@ -207,6 +235,7 @@ export class HrmService {
 
   async createPosition(tenantId: string, dto: CreatePositionDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
+    await this.assertDepartment(tenantId, companyId, dto.departmentId);
     try {
       return await this.prisma.position.create({
         data: {
@@ -229,6 +258,7 @@ export class HrmService {
   async listEmployees(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.employee.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: {
         department: { select: { code: true, name: true } },
@@ -254,6 +284,13 @@ export class HrmService {
       });
       if (linked) throw new ConflictException('User ini sudah terhubung ke employee lain.');
     }
+    // Referensi harus milik tenant/company ini; tanpa cek, FK gagal sebagai 500 atau menautkan data asing.
+    await this.assertDepartment(tenantId, companyId, dto.departmentId);
+    if (dto.positionId) {
+      const pos = await this.prisma.position.findFirst({ where: { id: dto.positionId, tenantId, companyId }, select: { id: true } });
+      if (!pos) throw new NotFoundException('Jabatan tidak ditemukan.');
+    }
+    if (dto.managerId) await this.assertEmployee(tenantId, companyId, dto.managerId);
     try {
       return await this.prisma.employee.create({
         data: {
@@ -290,6 +327,10 @@ export class HrmService {
     if (employee.terminationDate) {
       throw new ConflictException('Employee ini sudah dinonaktifkan.');
     }
+    const when = new Date(date);
+    if (when < employee.hireDate) {
+      throw new BadRequestException('Tanggal berhenti tidak boleh sebelum tanggal masuk.');
+    }
     // Pegawai dengan laporan langsung tidak boleh berhenti duluan, supaya
     // struktur manajemen tidak menggantung.
     const reports = await this.prisma.employee.count({
@@ -300,10 +341,12 @@ export class HrmService {
         `Employee ini masih memiliki ${reports} bawahan. Pindahkan bawahan terlebih dahulu.`,
       );
     }
-    return this.prisma.employee.update({
-      where: { id },
-      data: { terminationDate: new Date(date), isActive: false },
+    const claimed = await this.prisma.employee.updateMany({
+      where: { id, tenantId, companyId, terminationDate: null },
+      data: { terminationDate: when, isActive: false },
     });
+    if (claimed.count !== 1) throw new ConflictException('Employee ini sudah dinonaktifkan.');
+    return this.prisma.employee.findUniqueOrThrow({ where: { id } });
   }
 
   // ============================== ATTENDANCE & LEAVE ==============================
@@ -311,8 +354,11 @@ export class HrmService {
   async recordAttendance(tenantId: string, dto: CreateAttendanceDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     await this.assertEmployee(tenantId, companyId, dto.employeeId);
+    // Kolom date bertipe DATE: normalkan ke awal hari supaya cocok dengan kunci unik (karyawan, tanggal).
+    const date = new Date(dto.date);
+    date.setUTCHours(0, 0, 0, 0);
     return this.prisma.attendance.upsert({
-      where: { employeeId_date: { employeeId: dto.employeeId, date: new Date(dto.date) } },
+      where: { employeeId_date: { employeeId: dto.employeeId, date } },
       update: {
         status: dto.status,
         overtimeHours: new Prisma.Decimal(dto.overtimeHours ?? 0),
@@ -322,7 +368,7 @@ export class HrmService {
         tenantId,
         companyId,
         employeeId: dto.employeeId,
-        date: new Date(dto.date),
+        date,
         status: dto.status,
         overtimeHours: new Prisma.Decimal(dto.overtimeHours ?? 0),
         note: dto.note ?? '',
@@ -369,13 +415,60 @@ export class HrmService {
     };
   }
 
-  async requestLeave(tenantId: string, employeeId: string, dto: { startDate: string; endDate: string; reason?: string }) {
+  /**
+   * Saldo cuti tahunan: hak 12 hari kerja per tahun kalender; terpakai = cuti
+   * `approved` pada tahun itu, menunggu = `pending`. Akhir pekan tidak memotong jatah.
+   */
+  async leaveBalance(tenantId: string, employeeId: string, year?: number) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     await this.assertEmployee(tenantId, companyId, employeeId);
+    const y = year ?? new Date().getUTCFullYear();
+    const yearStart = new Date(Date.UTC(y, 0, 1));
+    const yearEnd = new Date(Date.UTC(y, 11, 31));
+    const rows = await this.prisma.leaveRequest.findMany({
+      where: {
+        tenantId,
+        companyId,
+        employeeId,
+        status: { in: ['pending', 'approved'] },
+        startDate: { lte: yearEnd },
+        endDate: { gte: yearStart },
+      },
+      select: { status: true, startDate: true, endDate: true },
+    });
+    let used = 0;
+    let pending = 0;
+    for (const r of rows) {
+      const d = workingDaysInYear(r.startDate, r.endDate, y);
+      if (r.status === 'approved') used += d;
+      else pending += d;
+    }
+    return {
+      employeeId,
+      year: y,
+      entitlement: ANNUAL_LEAVE_QUOTA,
+      used,
+      pending,
+      remaining: ANNUAL_LEAVE_QUOTA - used - pending,
+    };
+  }
+
+  async requestLeave(tenantId: string, employeeId: string, dto: { startDate: string; endDate: string; reason?: string }) {
+    const companyId = await defaultCompanyId(this.prisma, tenantId);
+    const employee = await this.assertEmployee(tenantId, companyId, employeeId);
+    if (!employee.isActive) throw new BadRequestException('Employee nonaktif tidak bisa mengajukan cuti.');
     const start = new Date(dto.startDate);
     const end = new Date(dto.endDate);
+    start.setUTCHours(0, 0, 0, 0);
+    end.setUTCHours(0, 0, 0, 0);
     if (end < start) throw new BadRequestException('Tanggal akhir tidak boleh sebelum tanggal mulai.');
-    const days = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+    if (end.getTime() - start.getTime() > 366 * 86400000) {
+      throw new BadRequestException('Rentang cuti maksimal satu tahun.');
+    }
+    const days = countWorkingDays(start, end);
+    if (days === 0) {
+      throw new BadRequestException('Rentang tanggal hanya berisi akhir pekan; tidak ada hari kerja yang diambil.');
+    }
 
     const overlap = await this.prisma.leaveRequest.findFirst({
       where: {
@@ -390,6 +483,17 @@ export class HrmService {
     });
     if (overlap) throw new ConflictException('Ada pengajuan cuti yang bertumpang tindih.');
 
+    // Saldo dicek per tahun kalender yang disentuh rentang cuti.
+    for (let y = start.getUTCFullYear(); y <= end.getUTCFullYear(); y++) {
+      const need = workingDaysInYear(start, end, y);
+      const balance = await this.leaveBalance(tenantId, employeeId, y);
+      if (need > balance.remaining) {
+        throw new BadRequestException(
+          `Saldo cuti ${y} tidak cukup: sisa ${balance.remaining} hari, diminta ${need} hari.`,
+        );
+      }
+    }
+
     return this.prisma.leaveRequest.create({
       data: { tenantId, companyId, employeeId, startDate: start, endDate: end, days, reason: dto.reason ?? '' },
     });
@@ -397,17 +501,26 @@ export class HrmService {
 
   async decideLeave(tenantId: string, id: string, approverId: string, dto: DecideLeaveDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
-    const leave = await this.prisma.leaveRequest.findFirst({ where: { id, tenantId, companyId } });
+    const leave = await this.prisma.leaveRequest.findFirst({
+      where: { id, tenantId, companyId },
+      include: { employee: { select: { userId: true } } },
+    });
     if (!leave) throw new NotFoundException('Pengajuan cuti tidak ditemukan.');
     if (leave.status !== 'pending') throw new ConflictException('Pengajuan sudah diputuskan.');
-    return this.prisma.leaveRequest.update({
-      where: { id },
+    // Pemisahan kewenangan: pemohon tidak boleh memutuskan cutinya sendiri.
+    if (leave.employee.userId && leave.employee.userId === approverId) {
+      throw new ForbiddenException('Anda tidak boleh memutuskan pengajuan cuti Anda sendiri.');
+    }
+    const claimed = await this.prisma.leaveRequest.updateMany({
+      where: { id, tenantId, companyId, status: 'pending' },
       data: {
         status: dto.approve ? 'approved' : 'rejected',
         decidedById: approverId,
         decidedAt: new Date(),
       },
     });
+    if (claimed.count !== 1) throw new ConflictException('Pengajuan sudah diputuskan oleh permintaan lain.');
+    return this.prisma.leaveRequest.findUniqueOrThrow({ where: { id } });
   }
 
   // ============================== PAYROLL ==============================
@@ -457,11 +570,16 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
     const [year, mon] = dto.period.split('-').map(Number);
     const periodStart = new Date(Date.UTC(year, mon - 1, 1));
 
-    const items = employees.map((e) => {
+    // Pegawai yang baru masuk SETELAH periode ini belum berhak digaji (faktor 0).
+    const eligible = employees.filter((e) => this.prorateFactor(new Date(e.hireDate), periodStart) > 0);
+    if (eligible.length === 0) {
+      throw new BadRequestException('Tidak ada employee yang sudah aktif pada periode ini.');
+    }
+    const items = eligible.map((e) => {
       const o: PayrollOverrideShape = overrides.get(e.id) ?? EMPTY_OVERRIDE;
       // Pegawai yang baru masuk di tengah periode hanya dapat gaji prorata.
       const hire = new Date(e.hireDate);
-      const prorate = hire > periodStart ? this.prorateFactor(hire, periodStart) : 1;
+      const prorate = this.prorateFactor(hire, periodStart);
       const base = roundMoney(Number(e.baseSalary) * prorate);
 
       const overtime = roundMoney(o.overtimeAmount ?? 0);
@@ -481,6 +599,11 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
       const otherDeduction = roundMoney(o.otherDeduction ?? 0);
       const totalDeduction = roundMoney(pph21.amount + health + employment + otherDeduction);
       const net = roundMoney(gross - totalDeduction);
+      if (net < 0) {
+        throw new BadRequestException(
+          `Potongan melebihi gaji bruto untuk ${e.employeeNo}: bersih ${net}. Periksa potongan lain/BPJS.`,
+        );
+      }
 
       return {
         employeeId: e.id,
@@ -514,7 +637,8 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
       { gross: 0, deduction: 0, net: 0, employerCost: 0 },
     );
 
-    return this.prisma.payrollRun.create({
+    try {
+    return await this.prisma.payrollRun.create({
       data: {
         tenantId,
         companyId,
@@ -539,6 +663,13 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
         },
       },
     });
+    } catch (error) {
+      // Dua perhitungan periode yang sama bersamaan: unique (company, period) menahan yang kedua.
+      if (isUniqueViolation(error)) {
+        throw new ConflictException(`Payroll periode ${dto.period} sudah pernah dihitung.`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -552,6 +683,13 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
    * Utang gaji memakai (bersih + potongan lain), bukan bersih saja —
    * kalau potongan lain ikut hilang dari sisi kredit, jurnal tidak
    * seimbang karena barangnya tidak muncul di sisi debit.
+   *
+   * Sisi kredit gaji masuk ke akun kewajiban "Utang Gaji" (bukan akun Beban Gaji
+   * yang didebet): mengkreditnya ke akun beban yang sama menghapus beban gaji
+   * bersih dari laporan laba rugi dan tak meninggalkan utang ke karyawan.
+   *
+   * Klaim draft -> approved dilakukan atomik di dalam transaksi jurnal, jadi dua
+   * posting bersamaan tidak pernah menerbitkan dua jurnal untuk satu payroll.
    */
   async postPayroll(tenantId: string, id: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
@@ -563,12 +701,6 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
     if (run.status !== 'draft') {
       throw new ConflictException(`Payroll sudah berstatus ${run.status}.`);
     }
-
-    const [salaryAcc, pphAcc, socialAcc] = await Promise.all([
-      this.account(tenantId, companyId, SALARY_ACCOUNT, 'Beban Gaji'),
-      this.account(tenantId, companyId, PPH21_PAYABLE, 'Utang PPh 21'),
-      this.account(tenantId, companyId, SOCIAL_PAYABLE, 'Utang BPJS'),
-    ]);
 
     const gross = Number(run.totalGross);
     const employerCost = Number(run.totalEmployerCost);
@@ -585,30 +717,43 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
     const payableToEmployee = roundMoney(net + otherDeduction);
     const socialPayable = roundMoney(social + employerCost);
     const debit = roundMoney(gross + employerCost);
+    const credit = roundMoney(payableToEmployee + pph21 + socialPayable);
 
-    if (payableToEmployee + pph21 + socialPayable !== debit) {
-      throw new BadRequestException(
-        `Jurnal payroll tidak seimbang (Dr ${debit} vs Cr ${payableToEmployee + pph21 + socialPayable}).`,
-      );
-    }
-
-    const lines = [
-      { accountId: salaryAcc.id, direction: 'debit' as const, amount: debit, memo: 'Beban gaji & tunjangan' },
-      { accountId: salaryAcc.id, direction: 'credit' as const, amount: payableToEmployee, memo: 'Utang gaji karyawan' },
-      { accountId: socialAcc.id, direction: 'credit' as const, amount: socialPayable, memo: 'Utang BPJS' },
-    ];
-    // PPh 21 bisa nol (mis. belum ada bracket aktif); baris nol diabaikan
-    // karena JournalService menolak jurnal yang tidak menyeimbangkan.
-    if (pph21 > 0) {
-      lines.push({
-        accountId: pphAcc.id,
-        direction: 'credit' as const,
-        amount: pph21,
-        memo: 'Utang PPh 21',
-      });
+    // Dibandingkan dalam sen: selisih floating point tidak boleh memblokir posting yang sah.
+    if (Math.round(credit * 100) !== Math.round(debit * 100)) {
+      throw new BadRequestException(`Jurnal payroll tidak seimbang (Dr ${debit} vs Cr ${credit}).`);
     }
 
     return this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.payrollRun.updateMany({
+        where: { id, tenantId, companyId, status: 'draft' },
+        data: { status: 'approved' },
+      });
+      if (claimed.count !== 1) throw new ConflictException('Payroll sudah diposting oleh permintaan lain.');
+
+      const [salaryAcc, pphAcc, socialAcc, wagesPayableAcc] = await Promise.all([
+        this.accountIn(tx, tenantId, companyId, SALARY_ACCOUNT, 'Beban Gaji'),
+        this.accountIn(tx, tenantId, companyId, PPH21_PAYABLE, 'Utang PPh 21'),
+        this.accountIn(tx, tenantId, companyId, SOCIAL_PAYABLE, 'Utang BPJS'),
+        ensureAccount(tx, tenantId, companyId, WAGES_PAYABLE_ACCOUNT),
+      ]);
+
+      const lines = [
+        { accountId: salaryAcc.id, direction: 'debit' as const, amount: debit, memo: 'Beban gaji & tunjangan' },
+        { accountId: wagesPayableAcc.id, direction: 'credit' as const, amount: payableToEmployee, memo: 'Utang gaji karyawan' },
+        { accountId: socialAcc.id, direction: 'credit' as const, amount: socialPayable, memo: 'Utang BPJS' },
+      ];
+      // PPh 21 bisa nol (mis. belum ada bracket aktif); baris nol diabaikan
+      // karena JournalService menolak jurnal yang tidak menyeimbangkan.
+      if (pph21 > 0) {
+        lines.push({
+          accountId: pphAcc.id,
+          direction: 'credit' as const,
+          amount: pph21,
+          memo: 'Utang PPh 21',
+        });
+      }
+
       const journal = await this.journals.post(tx, {
         tenantId,
         companyId,
@@ -621,7 +766,7 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
 
       const updated = await tx.payrollRun.update({
         where: { id },
-        data: { status: 'approved', journalId: journal.id },
+        data: { journalId: journal.id },
       });
       return { payroll: updated, journalId: journal.id, net, employerCost };
     });
@@ -658,6 +803,7 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
   listPayrollRuns(tenantId: string) {
     return this.companyOf(tenantId).then((companyId) =>
       this.prisma.payrollRun.findMany({
+      take: 500,
         where: { tenantId, companyId },
         include: { _count: { select: { items: true } } },
         orderBy: { period: 'desc' },
@@ -707,6 +853,12 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
     );
   }
 
+  private async assertDepartment(tenantId: string, companyId: string, departmentId?: string | null) {
+    if (!departmentId) return;
+    const dep = await this.prisma.department.findFirst({ where: { id: departmentId, tenantId, companyId }, select: { id: true } });
+    if (!dep) throw new NotFoundException('Departemen tidak ditemukan.');
+  }
+
   private async assertEmployee(tenantId: string, companyId: string, id: string) {
     const employee = await this.prisma.employee.findFirst({
       where: { id, tenantId, companyId },
@@ -729,15 +881,26 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
     return account;
   }
 
-  /** Pegawai baru di tengah bulan: gaji proporsional hari kerja. */
+  /** Versi dari dalam transaksi, supaya akun & jurnal satu transaksi dengan klaim status. */
+  private async accountIn(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    companyId: string,
+    code: string,
+    label: string,
+  ) {
+    const account = await tx.chartOfAccount.findFirst({ where: { tenantId, companyId, code } });
+    if (!account) {
+      throw new NotFoundException(
+        `Akun ${code} (${label}) belum ada pada COA perusahaan. Tambahkan dulu sebelum memakai payroll.`,
+      );
+    }
+    return account;
+  }
+
+  /** Pegawai baru di tengah bulan: gaji proporsional hari kalender; 0 bila masuk setelah periode. */
   private prorateFactor(hireDate: Date, periodStart: Date): number {
-    const daysInMonth = new Date(
-      periodStart.getUTCFullYear(),
-      periodStart.getUTCMonth() + 1,
-      0,
-    ).getUTCDate();
-    const dayOfMonth = hireDate.getUTCDate();
-    return Math.max(1, daysInMonth - dayOfMonth + 1) / daysInMonth;
+    return prorateFactorFor(hireDate, periodStart);
   }
 }
 
@@ -747,26 +910,6 @@ export const DEFAULT_BPJS_HEALTH_RATE = 0.01;
 /** Beban perusahaan: 4% ketenagakerjaan + 5% kesehatan (ATK). */
 export const EMPLOYER_BPJS_RATE = 0.09;
 
-/** Jam kerja standar per hari; lembur dihitung dari kelebihan ini. */
-const STANDARD_WORK_HOURS = 8;
-/** Batas lembur harian sesuai praktik umum perusahaan. */
-const MAX_DAILY_OVERTIME = 4;
-/** Batas keterlambatan sebelum tercatat, dalam menit. */
-const GRACE_MINUTES = 15;
-
-function startOfUtcDay(d: Date): Date {
-  const out = new Date(d);
-  out.setUTCHours(0, 0, 0, 0);
-  return out;
-}
-
 function formatTime(d: Date): string {
   return new Date(d).toISOString().slice(11, 16);
-}
-
-/** Menit keterlambatan dihitung dari 08:00 + masa tenggang. */
-function minutesLate(now: Date): number {
-  const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const scheduled = 8 * 60 + GRACE_MINUTES;
-  return Math.max(minutes - scheduled, 0);
 }

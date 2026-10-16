@@ -190,7 +190,7 @@ export default function Login() {
     <div className="min-h-screen bg-bone flex flex-col">
       {showBar && (
         <div className="relative bg-charcoal text-paper text-body-sm text-center h-10 flex items-center justify-center px-10">
-          Retalio 1.0 — Smart Business System untuk Usaha &amp; Karyawan Indonesia
+          Retalio ERP untuk usaha dan karyawan Indonesia
           <button
             type="button"
             aria-label="Tutup pengumuman"
@@ -294,7 +294,7 @@ export default function Login() {
                   type="text"
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder="mis. ferry@newsembakery / owner@usaha.id"
+                  placeholder="mis. ferry@newsembakery.id / owner@usaha.id"
                   disabled={lockoutRemaining > 0}
                   required
                   autoComplete="username"
@@ -379,7 +379,7 @@ export default function Login() {
               type="text"
               value={resetEmail}
               onChange={(e) => setResetEmail(e.target.value)}
-              placeholder="mis. ferry@newsembakery / owner@usaha.id"
+              placeholder="mis. ferry@newsembakery.id / owner@usaha.id"
             />
             <div className="mt-6 flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setResetOpen(false)}>

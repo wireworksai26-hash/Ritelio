@@ -5,7 +5,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
-  IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -141,7 +141,7 @@ export class CreateShipmentDto {
 }
 
 export class UpdateShipmentStatusDto {
-  @IsEnum(['pending', 'in_transit', 'delivered', 'cancelled'])
+  @IsIn(['pending', 'in_transit', 'delivered', 'cancelled'])
   status!: 'pending' | 'in_transit' | 'delivered' | 'cancelled';
 
   @IsOptional()
@@ -238,7 +238,7 @@ export class CreateWorkOrderDto {
   assigneeId?: string;
 
   @IsOptional()
-  @IsEnum(PRIORITIES)
+  @IsIn(PRIORITIES)
   priority?: (typeof PRIORITIES)[number];
 
   @IsOptional()
@@ -248,11 +248,11 @@ export class CreateWorkOrderDto {
 
 export class UpdateWorkOrderDto {
   @IsOptional()
-  @IsEnum(['open', 'in_progress', 'completed', 'closed'])
+  @IsIn(['open', 'in_progress', 'completed', 'closed'])
   status?: 'open' | 'in_progress' | 'completed' | 'closed';
 
   @IsOptional()
-  @IsEnum(PRIORITIES)
+  @IsIn(PRIORITIES)
   priority?: (typeof PRIORITIES)[number];
 
   @IsOptional()
@@ -314,7 +314,7 @@ export class ListTimesheetsDto {
   employeeId?: string;
 
   @IsOptional()
-  @IsEnum(['draft', 'submitted', 'approved'])
+  @IsIn(['draft', 'submitted', 'approved'])
   status?: 'draft' | 'submitted' | 'approved';
 
   @IsOptional()

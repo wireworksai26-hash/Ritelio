@@ -9,6 +9,7 @@ function mockPrisma(overrides: Row = {}) {
     companyId: 'company-1',
     project: null as Row | null,
     timesheet: null as Row | null,
+    existingTimesheet: null as Row | null,
     employee: null as Row | null,
     shipment: null as Row | null,
     workOrder: null as Row | null,
@@ -26,6 +27,7 @@ productCount: 1,
       },
       timesheet: {
         findFirst: async () => state.timesheet,
+        findUnique: async () => state.existingTimesheet,
         update: async ({ data }: { data: Row }) => ({ ...state.timesheet, ...data }),
         upsert: async ({ create }: { create: Row }) => ({ id: 'ts-1', status: 'submitted', billable: true, ...create }),
         findMany: async () => [],
@@ -84,6 +86,35 @@ describe('OperationsService', () => {
         companyId: 'company-9',
         isActive: true,
       });
+    });
+
+    it.each([
+      ['sudah disetujui', { id: 'ts-1', status: 'approved', billedAt: null, projectId: 'p-1' }],
+      ['sudah ditagihkan', { id: 'ts-1', status: 'submitted', billedAt: new Date(), projectId: 'p-1' }],
+    ])('menolak menimpa timesheet yang %s (jam sudah jadi faktur / persetujuan tak boleh tereset)', async (_label, existing) => {
+      const { prisma } = mockPrisma({
+        project: { id: 'p-1', tenantId: 'tenant-1', companyId: 'company-9' },
+        employee: { id: 'e-1' },
+        existingTimesheet: existing,
+      });
+      const service = makeService(prisma);
+      await expect(service.recordTimesheet('tenant-1', base)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('menormalkan tanggal kerja ke awal hari UTC supaya kunci unik (karyawan, tanggal) cocok', async () => {
+      let seenKey: Row | undefined;
+      const { prisma } = mockPrisma({
+        project: { id: 'p-1', tenantId: 'tenant-1', companyId: 'company-9' },
+        employee: { id: 'e-1' },
+      });
+      (prisma.timesheet as Record<string, unknown>).findUnique = async (args: { where: Row }) => {
+        seenKey = args.where;
+        return null;
+      };
+      const service = makeService(prisma);
+      await service.recordTimesheet('tenant-1', { ...base, workDate: '2026-01-05T15:30:00.000Z' });
+      const key = seenKey?.employeeId_workDate as { workDate: Date };
+      expect(key.workDate.toISOString()).toBe('2026-01-05T00:00:00.000Z');
     });
 
     it('menolak employee yang tidak ada', async () => {

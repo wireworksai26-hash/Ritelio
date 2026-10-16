@@ -10,6 +10,8 @@ import { PrismaService } from '../../common/prisma.service';
 import { defaultCompanyId } from '../../common/utils/default-company';
 import { roundMoney } from '../../common/utils/money';
 import { JournalService } from '../accounting/journal.service';
+import { withSerializableRetry } from '../accounting/serializable-retry';
+import { grossAmount, outstandingOf } from '../finance/document-amounts';
 import { TaxDocumentsService } from '../tax/tax-documents.service';
 import { buildBillNote, buildBillPosting, resolveDueDate, supplierInvoiceTag } from './bill-input';
 import type {
@@ -71,14 +73,14 @@ export class PayablesService {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     const bills = await this.prisma.vendorBill.findMany({
       where: { tenantId, companyId, status: { in: ['open', 'partial'] } },
-      select: { dueDate: true, total: true, paidAmount: true },
+      select: { dueDate: true, total: true, taxTotal: true, paidAmount: true },
     });
 
     const today = new Date();
     const buckets = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90plus: 0 };
     let total = 0;
     for (const b of bills) {
-      const outstanding = roundMoney(Number(b.total) - Number(b.paidAmount));
+      const outstanding = outstandingOf(b);
       total += outstanding;
       const daysLate = Math.floor((today.getTime() - new Date(b.dueDate).getTime()) / 86400000);
       if (daysLate <= 0) buckets.current += outstanding;
@@ -144,7 +146,7 @@ export class PayablesService {
     const note = buildBillNote(dto.supplierInvoiceNumber, dto.note, opts.source);
     const billId = randomUUID();
 
-    return this.prisma.$transaction(
+    return withSerializableRetry(() => this.prisma.$transaction(
       async (tx) => {
         if (opts.idempotencyKey) {
           try {
@@ -216,7 +218,7 @@ export class PayablesService {
         return { ...this.withOutstanding(bill), journalId: journal.id };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+    ));
   }
 
   /** Dipanggil dari purchasing.receive dalam transaksi yang sama. */
@@ -260,22 +262,18 @@ export class PayablesService {
     return bill;
   }
 
-  /** Bayar satu faktur. Excess payment ditolak agar tidak jadi uang hilang. */
+  /**
+   * Bayar satu faktur. Excess payment ditolak agar tidak jadi uang hilang.
+   *
+   * Baris faktur dikunci (SELECT ... FOR UPDATE) di dalam transaksi pembayaran,
+   * lalu status & sisa dibaca ulang di bawah kunci itu. Tanpa kunci, pembayaran
+   * paralel sama-sama lolos pengecekan sisa dan total terbayar melebihi tagihan.
+   * Yang dibayar adalah nilai penuh faktur (DPP + PPN), karena PPN ikut masuk
+   * ke Hutang Usaha di buku besar.
+   */
   async payBill(tenantId: string, billId: string, dto: CreatePaymentDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
-    const bill = await this.prisma.vendorBill.findFirst({ where: { id: billId, tenantId, companyId } });
-    if (!bill) throw new NotFoundException('Faktur pembelian tidak ditemukan.');
-    if (bill.status === 'paid' || bill.status === 'voided') {
-      throw new BadRequestException(`Faktur ${bill.number} sudah ${bill.status}.`);
-    }
-
-    const outstanding = roundMoney(Number(bill.total) - Number(bill.paidAmount));
     if (dto.amount <= 0) throw new BadRequestException('Nominal pembayaran harus positif.');
-    if (dto.amount > outstanding) {
-      throw new BadRequestException(
-        `Pembayaran melebihi sisa tagihan. Sisa: ${outstanding.toLocaleString('id-ID')}.`,
-      );
-    }
 
     const [hutang, kas] = await Promise.all([
       this.findAccount(tenantId, companyId, '2000', 'Hutang Usaha'),
@@ -283,10 +281,26 @@ export class PayablesService {
     ]);
 
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM vendor_bills WHERE id = ${billId} AND tenant_id = ${tenantId} AND company_id = ${companyId} FOR UPDATE`;
+      const bill = await tx.vendorBill.findFirst({ where: { id: billId, tenantId, companyId } });
+      if (!bill) throw new NotFoundException('Faktur pembelian tidak ditemukan.');
+      if (bill.status === 'paid' || bill.status === 'voided') {
+        throw new BadRequestException(`Faktur ${bill.number} sudah ${bill.status}.`);
+      }
+
+      const gross = grossAmount(bill);
+      const outstanding = roundMoney(gross - Number(bill.paidAmount));
+      if (dto.amount > outstanding) {
+        throw new BadRequestException(
+          `Pembayaran melebihi sisa tagihan. Sisa: ${outstanding.toLocaleString('id-ID')}.`,
+        );
+      }
+
+      const payDate = dto.payDate ? new Date(dto.payDate) : new Date();
       const journal = await this.journals.post(tx, {
         tenantId,
         companyId,
-        entryDate: dto.payDate ? new Date(dto.payDate) : new Date(),
+        entryDate: payDate,
         sourceModule: 'payables',
         sourceRefId: billId,
         memo: `Pembayaran faktur ${bill.number}`,
@@ -305,7 +319,7 @@ export class PayablesService {
           supplierId: bill.supplierId,
           billId,
           journalId: journal.id,
-          payDate: dto.payDate ? new Date(dto.payDate) : new Date(),
+          payDate,
           amount: new Prisma.Decimal(dto.amount),
           method: dto.method ?? 'cash',
           note: dto.note ?? '',
@@ -313,8 +327,8 @@ export class PayablesService {
       });
 
       const paidAmount = roundMoney(Number(bill.paidAmount) + dto.amount);
-      // Dibandingkan dengan total, bukan sisa: `paidAmount` sudah kumulatif.
-      const status = paidAmount >= roundMoney(Number(bill.total)) ? 'paid' : 'partial';
+      // Dibandingkan dengan nilai penuh, bukan sisa: `paidAmount` sudah kumulatif.
+      const status = paidAmount >= gross ? 'paid' : 'partial';
       await tx.vendorBill.update({
         where: { id: billId },
         data: { paidAmount: new Prisma.Decimal(paidAmount), status },
@@ -329,25 +343,16 @@ export class PayablesService {
       where: { tenantId, companyId, code },
     });
     if (account) return account;
-    // Fallback by type agar sistem tetap jalan walau COA dikustom.
-    if (code === '1000') {
-      const cash = await this.prisma.chartOfAccount.findFirst({
-        where: { tenantId, companyId, type: 'asset', code: { startsWith: '1' } },
-      });
-      if (cash) return cash;
-    } else {
-      const liability = await this.prisma.chartOfAccount.findFirst({
-        where: { tenantId, companyId, type: 'liability', code: { startsWith: '2' } },
-      });
-      if (liability) return liability;
-    }
+    // Tanpa fallback berdasarkan tipe: akun pertama bertipe sama bisa saja Hutang PPN atau
+    // Persediaan, dan memposting ke sana diam-diam lebih buruk daripada menolak.
     throw new NotFoundException(`Akun ${code} (${fallback}) belum ada pada COA perusahaan.`);
   }
 
-  private withOutstanding<T extends { total: unknown; paidAmount: unknown }>(bill: T) {
+  private withOutstanding<T extends { total: unknown; taxTotal?: unknown; paidAmount: unknown }>(bill: T) {
     return {
       ...bill,
-      outstanding: roundMoney(Number(bill.total) - Number(bill.paidAmount)),
+      grossTotal: grossAmount(bill),
+      outstanding: outstandingOf(bill),
     };
   }
 }

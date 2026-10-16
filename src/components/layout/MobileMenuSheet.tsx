@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { cn } from '../../lib/format';
 import { Icon } from '../icons/Icon';
-import { groupNav, type NavItem } from './nav';
+import { useNavStore, isGroupOpen } from '../../stores/navStore';
+import { NavGroupHeader } from './NavGroupHeader';
+import { activeGroupKey, groupNav, isCollapsibleGroup, isNavItemActive, type NavItem } from './nav';
 
 interface MobileMenuSheetProps {
   open: boolean;
@@ -14,6 +16,11 @@ interface MobileMenuSheetProps {
 // jadi semua modul dikelompokkan di sini dan bisa dicari.
 export function MobileMenuSheet({ open, onClose, items }: MobileMenuSheetProps) {
   const [query, setQuery] = useState('');
+  const { pathname } = useLocation();
+  const openState = useNavStore((s) => s.open);
+  const setOpen = useNavStore((s) => s.setOpen);
+  const activeKey = activeGroupKey(items, pathname);
+  const searching = query.trim().length > 0;
 
   useEffect(() => {
     if (!open) return;
@@ -71,33 +78,53 @@ export function MobileMenuSheet({ open, onClose, items }: MobileMenuSheetProps) 
 
         <div className="overflow-y-auto overscroll-contain px-4 pb-5 space-y-5">
           {groups.length === 0 && <p className="text-body-sm text-fossil text-center py-8">Menu tidak ditemukan.</p>}
-          {groups.map((group) => (
-            <section key={group.key} aria-label={group.label}>
-              <h2 className="text-[11px] uppercase tracking-[0.08em] text-pebble mb-2">{group.label}</h2>
-              <div className="grid grid-cols-2 gap-2">
-                {group.items.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.end}
-                    onClick={onClose}
-                    className={({ isActive }) =>
-                      cn(
-                        'flex flex-col gap-2 rounded-xl border px-3.5 py-3 min-h-[84px] active:scale-[0.98] transition-all',
-                        isActive ? 'bg-sand border-ink/30 text-ink' : 'bg-paper border-ash text-ink',
-                      )
-                    }
-                  >
-                    <Icon name={item.icon} size={20} strokeWidth={1.5} />
-                    <span>
-                      <span className="block text-[14px] leading-tight">{item.label}</span>
-                      {item.hint && <span className="block text-caption text-fossil leading-snug mt-0.5 line-clamp-2">{item.hint}</span>}
-                    </span>
-                  </NavLink>
-                ))}
-              </div>
-            </section>
-          ))}
+          {groups.map((group) => {
+            const collapsible = isCollapsibleGroup(group.key, group.items.length);
+            // Saat mencari, semua hasil ditampilkan agar tidak ada yang tersembunyi di grup tertutup.
+            const open = !collapsible || searching || isGroupOpen(openState, group.key, activeKey);
+            const panelId = `sheet-group-${group.key}`;
+            return (
+              <section key={group.key} aria-label={group.label}>
+                {collapsible && !searching ? (
+                  <NavGroupHeader
+                    label={group.label}
+                    count={group.items.length}
+                    open={open}
+                    panelId={panelId}
+                    hasActive={group.items.some((i) => isNavItemActive(i, pathname))}
+                    onToggle={() => setOpen(group.key, !open)}
+                    className="-mx-3"
+                  />
+                ) : (
+                  <h2 className="text-[11px] uppercase tracking-[0.08em] text-pebble mb-2">{group.label}</h2>
+                )}
+                {open && (
+                  <div id={panelId} className="mt-1.5 grid grid-cols-2 gap-2">
+                    {group.items.map((item) => (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        end={item.end}
+                        onClick={onClose}
+                        className={({ isActive }) =>
+                          cn(
+                            'flex flex-col gap-2 rounded-xl border px-3.5 py-3 min-h-[84px] active:scale-[0.98] transition-all',
+                            isActive ? 'bg-sand border-ink/30 text-ink' : 'bg-paper border-ash text-ink',
+                          )
+                        }
+                      >
+                        <Icon name={item.icon} size={20} strokeWidth={1.5} />
+                        <span>
+                          <span className="block text-[14px] leading-tight">{item.label}</span>
+                          {item.hint && <span className="block text-caption text-fossil leading-snug mt-0.5 line-clamp-2">{item.hint}</span>}
+                        </span>
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
         </div>
       </div>
     </div>

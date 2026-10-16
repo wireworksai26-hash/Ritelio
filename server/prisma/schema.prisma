@@ -803,7 +803,7 @@ model CustomerReceipt {
   companyId  String        @map("company_id")
   number     String
   customerId String?       @map("customer_id")
-  invoiceId  String?       @unique @map("invoice_id")
+  invoiceId  String?       @map("invoice_id")
   journalId  String?       @map("journal_id")
   payDate    DateTime      @default(now()) @map("pay_date")
   amount     Decimal       @db.Decimal(18, 2)

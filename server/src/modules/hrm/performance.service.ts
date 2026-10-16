@@ -19,6 +19,7 @@ export class PerformanceService {
   async listDefinitions(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.kpiDefinition.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: { _count: { select: { targets: true } } },
       orderBy: { code: 'asc' },
@@ -75,12 +76,17 @@ export class PerformanceService {
       throw new BadRequestException('Ada employee yang tidak ditemukan atau nonaktif.');
     }
 
+    // Validasi SEMUA baris dulu: target ke-N yang salah tidak boleh meninggalkan target 1..N-1 tersimpan.
+    for (const t of targets) {
+      if (!Number.isFinite(t.target) || t.target < 0 || t.target > 999_999_999_999) {
+        throw new BadRequestException('Target harus angka 0 sampai 999.999.999.999.');
+      }
+      if (t.weight != null && (!Number.isFinite(t.weight) || t.weight < 0 || t.weight > 100)) {
+        throw new BadRequestException('Bobot harus angka 0 sampai 100.');
+      }
+    }
     const saved = [];
     for (const t of targets) {
-      if (!Number.isFinite(t.target) || t.target < 0) throw new BadRequestException('Target harus angka tidak negatif.');
-      if (t.weight !== undefined && (!Number.isFinite(t.weight) || t.weight < 0)) {
-        throw new BadRequestException('Bobot harus angka tidak negatif.');
-      }
       saved.push(
         await this.prisma.kpiTarget.upsert({
           where: {
@@ -142,6 +148,9 @@ export class PerformanceService {
   /** Progres satu employee pada satu periode, termasuk bobot dan pencapaian. */
   async employeeScore(tenantId: string, employeeId: string, period: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
+    // Employee harus milik tenant ini; id asing dijawab 404, bukan "belum ada target" 200.
+    const employee = await this.prisma.employee.findFirst({ where: { id: employeeId, tenantId, companyId }, select: { id: true } });
+    if (!employee) throw new NotFoundException('Employee tidak ditemukan.');
     const targets = await this.prisma.kpiTarget.findMany({
       where: { tenantId, companyId, employeeId, period },
       include: { kpi: { select: { code: true, name: true, unit: true, higherIsBetter: true } } },
@@ -220,6 +229,7 @@ export class PerformanceService {
   async listReviews(tenantId: string, period?: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.performanceReview.findMany({
+      take: 500,
       where: { tenantId, companyId, ...(period ? { period } : {}) },
       include: { employee: { select: { employeeNo: true, fullName: true, position: { select: { name: true } } } } },
       orderBy: [{ period: 'desc' }, { score: 'desc' }],

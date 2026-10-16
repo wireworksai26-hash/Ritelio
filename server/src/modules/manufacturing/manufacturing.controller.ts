@@ -16,6 +16,7 @@ import {
   CreateScheduleDto,
   CreateWorkCenterDto,
   ProposeScheduleDto,
+  UpdateWorkCenterDto,
   RecordQcDto,
 } from './dto/workcenter.dto';
 import { ManufacturingService } from './manufacturing.service';
@@ -123,7 +124,7 @@ export class ManufacturingController {
 
   @Patch('work-centers/:id')
   @RequirePermissions('inventory:write')
-  updateWorkCenter(@Tenant() tenantId: string, @Param('id') id: string, @Body() dto: CreateWorkCenterDto) {
+  updateWorkCenter(@Tenant() tenantId: string, @Param('id') id: string, @Body() dto: UpdateWorkCenterDto) {
     return this.workCenters.update(tenantId, id, dto);
   }
 

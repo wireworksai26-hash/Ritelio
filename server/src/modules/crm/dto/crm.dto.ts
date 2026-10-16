@@ -5,7 +5,7 @@ import {
   IsArray,
   IsDateString,
   IsEmail,
-  IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -122,7 +122,7 @@ export class CreateOpportunityDto {
   value?: number;
 
   @IsOptional()
-  @IsEnum(STAGES)
+  @IsIn(STAGES)
   stage?: (typeof STAGES)[number];
 
   @IsOptional()
@@ -213,7 +213,7 @@ const INTERACTION_TYPES = ['call', 'email', 'visit', 'meeting', 'note'] as const
 
 export class CreateInteractionDto {
   @IsOptional()
-  @IsEnum(INTERACTION_TYPES)
+  @IsIn(INTERACTION_TYPES)
   type?: (typeof INTERACTION_TYPES)[number];
 
   @IsString()
@@ -262,7 +262,7 @@ export class CreateComplaintDto {
 
 export class ResolveComplaintDto {
   @IsOptional()
-  @IsEnum(['in_progress', 'resolved'])
+  @IsIn(['in_progress', 'resolved'])
   status?: 'in_progress' | 'resolved';
 
   @IsOptional()
@@ -273,7 +273,7 @@ export class ResolveComplaintDto {
 
 /** Transisi status prospek; lompatan tahap ditolak oleh service. */
 export class MoveStageDto {
-  @IsEnum(['new', 'contacted', 'qualified', 'converted', 'lost'])
+  @IsIn(['new', 'contacted', 'qualified', 'converted', 'lost'])
   status!: 'new' | 'contacted' | 'qualified' | 'converted' | 'lost';
 
   @IsOptional()
@@ -284,7 +284,7 @@ export class MoveStageDto {
 
 /** Transisi tahap deal; urutan dijaga oleh service. */
 export class MoveOpportunityDto {
-  @IsEnum(['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost'])
+  @IsIn(['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost'])
   stage!: 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'closed_won' | 'closed_lost';
 
   @IsOptional()
@@ -301,7 +301,7 @@ export class MoveOpportunityDto {
 }
 
 export class MoveQuotationDto {
-  @IsEnum(['sent', 'accepted', 'rejected', 'expired', 'converted'])
+  @IsIn(['sent', 'accepted', 'rejected', 'expired', 'converted'])
   status!: 'sent' | 'accepted' | 'rejected' | 'expired' | 'converted';
 }
 

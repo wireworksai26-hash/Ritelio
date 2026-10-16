@@ -62,6 +62,7 @@ export class ModulesConfigService {
   }
 
   async getCustomFields(tenantId: string, key: string) {
+    await this.assertModuleExists(key);
     const cfg = await this.prisma.moduleConfig.findUnique({
       where: this.configKey(tenantId, key),
     });

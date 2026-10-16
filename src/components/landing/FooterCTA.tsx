@@ -87,7 +87,7 @@ export function FooterCTA() {
           bisnismu.
         </h2>
         <p className="mt-6 text-[17px] sm:text-[19px] text-fossil max-w-lg mx-auto">
-          Dari transaksi pertama sampai cabang kesepuluh — mulai gratis, upgrade saat siap.
+          Mulai dari kasir dan stok, tambah modul ERP saat bisnismu membutuhkannya. Coba gratis 14 hari.
         </p>
         <div className="mt-10 flex flex-wrap justify-center gap-3">
           <Button size="lg" iconRight="arrow-right" onClick={() => navigate('/onboarding')}>

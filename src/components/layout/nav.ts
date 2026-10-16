@@ -94,3 +94,22 @@ export function rolesForPath(path: string): Role[] {
   const item = NAV_ITEMS.find((i) => i.to === path);
   return item ? Array.from(new Set<Role>(['superadmin', ...item.roles])) : ['superadmin'];
 }
+
+/** Item menu aktif untuk path saat ini (end=true = cocok persis; selain itu cocok awalan segmen). */
+export function isNavItemActive(item: NavItem, pathname: string): boolean {
+  if (item.end) return pathname === item.to;
+  return pathname === item.to || pathname.startsWith(`${item.to}/`);
+}
+
+/** Grup yang memuat halaman aktif; dipakai membuka dropdown yang relevan secara otomatis. */
+export function activeGroupKey(items: NavItem[], pathname: string): NavGroupKey | undefined {
+  return items.find((i) => isNavItemActive(i, pathname))?.group;
+}
+
+/**
+ * Grup "utama" (Dashboard, Notifikasi) dan grup berisi satu item tampil datar tanpa dropdown:
+ * melipat satu baris hanya menambah satu ketukan tanpa merapikan apa pun.
+ */
+export function isCollapsibleGroup(key: NavGroupKey, itemCount: number): boolean {
+  return key !== 'utama' && itemCount > 1;
+}

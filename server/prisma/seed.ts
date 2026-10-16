@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { ensureFiscalCalendar } from '../src/common/utils/fiscal-calendar';
 import { ensureTenantRoles } from '../src/common/rbac/ensure-tenant-roles';
+import { assertSeedAllowed, resolveSeedPasswords } from '../src/common/utils/seed-guard';
 
 const prisma = new PrismaClient();
 
@@ -106,6 +107,9 @@ function daysAgo(days: number, hour = 10, minute = 0): Date {
 }
 
 async function main() {
+  // PENGAMAN: seed menghapus data. Tolak di produksi kecuali ALLOW_DESTRUCTIVE_SEED=yes.
+  assertSeedAllowed(process.env);
+  const seedPw = resolveSeedPasswords(process.env);
   console.log('Membersihkan data database lama…');
   const allTenantIds = [KELANA_TENANT_ID, NEWSEM_TENANT_ID];
 
@@ -299,8 +303,12 @@ async function main() {
   }
 
   // Karyawan & Pengguna Newsem Bakery
-  const adminPassHash = await bcrypt.hash('admin123', 10);
-  const ferryPassHash = await bcrypt.hash('ferry123', 10);
+  const [ownerPassHash, superadminPassHash, ferryPassHash, kelanaPassHash] = await Promise.all([
+    bcrypt.hash(seedPw.passwords.owner, 10),
+    bcrypt.hash(seedPw.passwords.superadmin, 10),
+    bcrypt.hash(seedPw.passwords.manager, 10),
+    bcrypt.hash(seedPw.passwords.kelana, 10),
+  ]);
 
   // Superadmin
   await prisma.user.create({
@@ -309,7 +317,7 @@ async function main() {
       tenantId: NEWSEM_TENANT_ID,
       name: 'Raden Mas Arya',
       email: 'superadmin@retalio.id',
-      passwordHash: adminPassHash,
+      passwordHash: superadminPassHash,
       role: 'superadmin',
       roleId: newsemRoles.superadmin,
       permissions: { all: true, superadmin: true },
@@ -323,7 +331,7 @@ async function main() {
       tenantId: NEWSEM_TENANT_ID,
       name: 'Owner Newsem Bakery',
       email: 'owner@newsembakery.id',
-      passwordHash: adminPassHash,
+      passwordHash: ownerPassHash,
       role: 'owner',
       roleId: newsemRoles.owner,
       permissions: { all: true },
@@ -336,7 +344,7 @@ async function main() {
       id: 'u-ferry',
       tenantId: NEWSEM_TENANT_ID,
       name: 'Ferry',
-      email: 'ferry@newsembakery',
+      email: 'ferry@newsembakery.id',
       passwordHash: ferryPassHash,
       role: 'manager',
       roleId: newsemRoles.manager,
@@ -651,7 +659,7 @@ async function main() {
         tenantId: KELANA_TENANT_ID,
         name,
         email,
-        passwordHash: adminPassHash,
+        passwordHash: kelanaPassHash,
         role,
         roleId: kelanaRoles[role],
       },
@@ -660,10 +668,17 @@ async function main() {
 
   console.log('\nSeed Database Selesai!');
   console.log('Akun Terdaftar:');
-  console.log('  Superadmin  : superadmin@retalio.id  / admin123');
-  console.log('  Owner Newsem: owner@newsembakery.id  / admin123');
-  console.log('  Manager Newsem: ferry@newsembakery   / ferry123');
-  console.log('  Owner Kelana: sari@kopikelana.id    / admin123');
+  if (seedPw.usedDevDefaults) {
+    // DEV ONLY — kata sandi bawaan hanya dipakai bila NODE_ENV != production dan env tidak diisi.
+    console.log('  [DEV] Superadmin  : superadmin@retalio.id  / ' + seedPw.passwords.superadmin);
+    console.log('  [DEV] Owner Newsem: owner@newsembakery.id  / ' + seedPw.passwords.owner);
+    console.log('  [DEV] Manager Newsem: ferry@newsembakery.id   / ' + seedPw.passwords.manager);
+    console.log('  [DEV] Owner Kelana: sari@kopikelana.id    / ' + seedPw.passwords.kelana);
+  }
+  if (seedPw.generated.length > 0) {
+    console.log('\nKata sandi acak (DICETAK SEKALI, simpan sekarang):');
+    for (const account of seedPw.generated) console.log(`  ${account}: ${seedPw.passwords[account]}`);
+  }
 }
 
 main()

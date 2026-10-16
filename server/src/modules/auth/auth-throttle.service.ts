@@ -65,21 +65,21 @@ export class AuthThrottleService {
       keys.map(
         (k) => this.prisma.$executeRaw`
         INSERT INTO auth_attempts ("key", failures, window_start, locked_until, updated_at)
-        VALUES (${k.key}, 1, now(), ${k.limit <= 1 ? new Date(Date.now() + LOCK_MINUTES * 60_000) : null}, now())
+        VALUES (${k.key}, 1, timezone('utc', now()), NULL, timezone('utc', now()))
         ON CONFLICT ("key") DO UPDATE SET
           failures = CASE
-            WHEN auth_attempts.window_start < now() - make_interval(mins => ${WINDOW_MINUTES}) THEN 1
+            WHEN auth_attempts.window_start < timezone('utc', now()) - make_interval(mins => ${WINDOW_MINUTES}::int) THEN 1
             ELSE auth_attempts.failures + 1 END,
           window_start = CASE
-            WHEN auth_attempts.window_start < now() - make_interval(mins => ${WINDOW_MINUTES}) THEN now()
+            WHEN auth_attempts.window_start < timezone('utc', now()) - make_interval(mins => ${WINDOW_MINUTES}::int) THEN timezone('utc', now())
             ELSE auth_attempts.window_start END,
           locked_until = CASE
             WHEN (CASE
-                    WHEN auth_attempts.window_start < now() - make_interval(mins => ${WINDOW_MINUTES}) THEN 1
-                    ELSE auth_attempts.failures + 1 END) >= ${k.limit}
-              THEN now() + make_interval(mins => ${LOCK_MINUTES})
+                    WHEN auth_attempts.window_start < timezone('utc', now()) - make_interval(mins => ${WINDOW_MINUTES}::int) THEN 1
+                    ELSE auth_attempts.failures + 1 END) >= ${k.limit}::int
+              THEN timezone('utc', now()) + make_interval(mins => ${LOCK_MINUTES}::int)
             ELSE auth_attempts.locked_until END,
-          updated_at = now()`,
+          updated_at = timezone('utc', now())`,
       ),
     );
   }

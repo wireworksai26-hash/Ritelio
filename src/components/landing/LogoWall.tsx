@@ -1,9 +1,10 @@
 import { Reveal } from '../Reveal';
 
-// Logo wall bergaya marquee (placeholder wordmark teks, monokrom fossil)
+// Jenis usaha yang dirancang untuk didukung. Bukan daftar pelanggan: ganti dengan logo
+// pelanggan sungguhan (dengan izin mereka) bila sudah ada.
 const NAMES = [
-  'Kopi Kelana', 'Batik Laras', 'Sahabat Laundry', 'Toko Berkah', 'Roti Nona',
-  'Bengkel Maju', 'Apotek Sehat', 'Kedai Senja', 'Florist Aroma', 'Gadget Hub',
+  'Toko Retail', 'Kafe & Restoran', 'Bakery', 'Manufaktur Kecil', 'Distributor',
+  'Jasa & Proyek', 'Apotek', 'Laundry', 'Bengkel', 'Toko Online',
 ];
 
 export function LogoWall() {
@@ -11,7 +12,7 @@ export function LogoWall() {
     <section className="py-20 lg:py-24">
       <Reveal className="mx-auto max-w-3xl px-6 text-center">
         <h2 className="text-heading font-light text-ink">
-          Dari toko tunggal sampai multi-cabang, bisnis berjalan di Retalio.
+          Dirancang untuk toko, kafe, pabrik kecil, dan bisnis jasa.
         </h2>
       </Reveal>
       <div className="marquee-fade mt-12 overflow-hidden">

@@ -10,6 +10,7 @@ import { cn } from '../../lib/format';
 
 const links = [
   { href: '#fitur', label: 'Fitur', id: 'fitur' },
+  { href: '#modul', label: 'Modul', id: 'modul' },
   { href: '#nilai', label: 'Nilai', id: 'nilai' },
   { href: '#harga', label: 'Harga', id: 'harga' },
   { href: '#keamanan', label: 'Keamanan', id: 'keamanan' },
@@ -51,7 +52,7 @@ export function LandingNav() {
       <div className="mx-auto max-w-[1240px] px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Left: Brand Logo */}
         <div className="flex items-center gap-3">
-          <Link to="/" aria-label="Retalio — beranda" className="flex items-center gap-2 group">
+          <Link to="/" aria-label="Retalio, beranda" className="flex items-center gap-2 group">
             <Logo />
           </Link>
         </div>

@@ -135,7 +135,7 @@ const defaultUsers: User[] = [
     id: 'u-newsem-ferry',
     tenant_id: 'tenant-newsem',
     name: 'Ferry (Manager)',
-    email: 'ferry@newsembakery',
+    email: 'ferry@newsembakery.id',
     password: 'ferry123',
     role: 'manager',
     outlet_id: 'outlet-newsem-1',

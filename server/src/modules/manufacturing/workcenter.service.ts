@@ -3,11 +3,13 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { defaultCompanyId } from '../../common/utils/default-company';
 import { roundMoney } from '../../common/utils/money';
+import { advisoryLock } from '../inventory/tx-retry';
 import type {
   CreateQcStageDto,
   CreateScheduleDto,
   CreateWorkCenterDto,
   RecordQcDto,
+  UpdateWorkCenterDto,
 } from './dto/workcenter.dto';
 
 /**
@@ -27,6 +29,7 @@ export class WorkCenterService {
   async list(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.workCenter.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: {
         _count: { select: { schedules: true } },
@@ -58,18 +61,19 @@ export class WorkCenterService {
     }
   }
 
-  async update(tenantId: string, id: string, dto: Partial<CreateWorkCenterDto>) {
+  async update(tenantId: string, id: string, dto: UpdateWorkCenterDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     const wc = await this.prisma.workCenter.findFirst({ where: { id, tenantId, companyId } });
     if (!wc) throw new NotFoundException('Work center tidak ditemukan.');
     return this.prisma.workCenter.update({
       where: { id },
       data: {
-        ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.capacityPerDay !== undefined ? { capacityPerDay: new Prisma.Decimal(dto.capacityPerDay) } : {}),
-        ...(dto.capacityMinutes !== undefined ? { capacityMinutes: dto.capacityMinutes } : {}),
-        ...(dto.hourlyRate !== undefined ? { hourlyRate: new Prisma.Decimal(dto.hourlyRate) } : {}),
-        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        // null dari klien = "tidak diubah" (kolom NOT NULL; Decimal(null) akan gagal 500).
+        ...(dto.capacityPerDay != null ? { capacityPerDay: new Prisma.Decimal(dto.capacityPerDay) } : {}),
+        ...(dto.capacityMinutes != null ? { capacityMinutes: dto.capacityMinutes } : {}),
+        ...(dto.hourlyRate != null ? { hourlyRate: new Prisma.Decimal(dto.hourlyRate) } : {}),
+        ...(dto.isActive != null ? { isActive: dto.isActive } : {}),
+        ...(dto.name != null ? { name: dto.name } : {}),
       },
     });
   }
@@ -85,6 +89,9 @@ export class WorkCenterService {
     const date = new Date(dto.scheduledDate);
     date.setUTCHours(0, 0, 0, 0);
     const duration = dto.durationMinutes ?? 0;
+    if (duration < 1) {
+      throw new BadRequestException('durationMinutes wajib diisi (minimal 1 menit).');
+    }
 
     const [wc, order] = await Promise.all([
       this.prisma.workCenter.findFirst({ where: { id: dto.workCenterId, tenantId, companyId, isActive: true } }),
@@ -97,37 +104,63 @@ export class WorkCenterService {
     }
 
     const start = dto.startMinutes ?? 0;
+    const end = start + duration;
 
-    // allowOverCapacity melewati KEDUA guard: total harian dan rentang satu
-    // hari. Ini jalur lembur — jadwal sengaja melewati jam kerja normal, jadi
-    // menjadikannya tetap terpotong hanya akan memaksaulli pemanggil.
-    if (!dto.allowOverCapacity) {
-      const used = await this.usedMinutes(tenantId, companyId, dto.workCenterId, date);
-      if (used.minutes + duration > wc.capacityMinutes) {
+    // Cek kapasitas, cek bentrok, dan insert dalam satu transaksi yang dikunci per
+    // work center + hari: dua permintaan bersamaan tidak bisa sama-sama lolos cek.
+    return this.prisma.$transaction(async (tx) => {
+      await advisoryLock(tx, `wc-schedule:${wc.id}:${date.toISOString().slice(0, 10)}`);
+
+      // Bentrok jam: satu mesin/work center tidak bisa mengerjakan dua order di
+      // rentang menit yang beririsan pada hari yang sama. Lembur (allowOverCapacity)
+      // melewati batas kapasitas, tapi tetap tidak boleh menumpuk jam.
+      const sameDay = await tx.productionSchedule.findMany({
+        where: {
+          tenantId,
+          companyId,
+          workCenterId: wc.id,
+          scheduledDate: date,
+          status: { not: 'cancelled' },
+        },
+        include: { productionOrder: { select: { number: true } } },
+      });
+      const clash = sameDay.find((s) => start < s.startMinutes + s.durationMinutes && s.startMinutes < end);
+      if (clash) {
         throw new ConflictException(
-          `Kapasitas ${wc.name} pada ${date.toISOString().slice(0, 10)} terlampaui: ` +
-            `${used.minutes} menit terpakai + ${duration} menit diminta, kapasitas ${wc.capacityMinutes} menit. ` +
-            'Pakai allowOverCapacity bila memang lembur.',
+          `Jadwal bentrok dengan ${clash.productionOrder.number} di ${wc.name} ` +
+            `(menit ${clash.startMinutes}-${clash.startMinutes + clash.durationMinutes}).`,
         );
       }
-      if (start + duration > wc.capacityMinutes) {
-        throw new BadRequestException(
-          `Waktu ${duration} menit mulai menit ke-${start} melewati kapasitas harian ${wc.capacityMinutes} menit.`,
-        );
-      }
-    }
 
-    return this.prisma.productionSchedule.create({
-      data: {
-        tenantId,
-        companyId,
-        workCenterId: wc.id,
-        productionOrderId: order.id,
-        scheduledDate: date,
-        startMinutes: start,
-        durationMinutes: duration,
-      },
-      include: { workCenter: true, productionOrder: { select: { number: true, qtyPlanned: true } } },
+      // allowOverCapacity melewati guard kapasitas harian dan rentang satu hari.
+      if (!dto.allowOverCapacity) {
+        const used = sameDay.reduce((sum, s) => sum + s.durationMinutes, 0);
+        if (used + duration > wc.capacityMinutes) {
+          throw new ConflictException(
+            `Kapasitas ${wc.name} pada ${date.toISOString().slice(0, 10)} terlampaui: ` +
+              `${used} menit terpakai + ${duration} menit diminta, kapasitas ${wc.capacityMinutes} menit. ` +
+              'Pakai allowOverCapacity bila memang lembur.',
+          );
+        }
+        if (end > wc.capacityMinutes) {
+          throw new BadRequestException(
+            `Waktu ${duration} menit mulai menit ke-${start} melewati kapasitas harian ${wc.capacityMinutes} menit.`,
+          );
+        }
+      }
+
+      return tx.productionSchedule.create({
+        data: {
+          tenantId,
+          companyId,
+          workCenterId: wc.id,
+          productionOrderId: order.id,
+          scheduledDate: date,
+          startMinutes: start,
+          durationMinutes: duration,
+        },
+        include: { workCenter: true, productionOrder: { select: { number: true, qtyPlanned: true } } },
+      });
     });
   }
 
@@ -356,13 +389,14 @@ export class WorkCenterService {
       }
     }
 
-    return this.writeQc(order, dto, inspectorId);
+    return this.writeQc(order, dto, inspectorId, Number(target.minPassPct));
   }
 
   private async writeQc(
     order: { id: string; tenantId: string; companyId: string; productId: string },
     dto: RecordQcDto,
     inspectorId?: string,
+    minPassPct = 100,
   ) {
     const checkedQty = dto.checkedQty ?? 0;
     const defectQty = dto.defectQty ?? 0;
@@ -371,11 +405,13 @@ export class WorkCenterService {
       throw new BadRequestException('Jumlah cacat tidak boleh melebihi jumlah yang diperiksa.');
     }
     const passPct = ((checkedQty - defectQty) / checkedQty) * 100;
+    // Ambang lulus per tahap (minPassPct) dihormati; tanpa konfigurasi = 100% (tanpa cacat).
+    const result = defectQty === 0 || passPct >= minPassPct ? 'passed' : 'failed';
 
     return this.prisma.qualityCheck.upsert({
       where: { productionOrderId_stage: { productionOrderId: order.id, stage: dto.stage } },
       update: {
-        result: defectQty > 0 ? 'failed' : 'passed',
+        result,
         checkedQty: new Prisma.Decimal(checkedQty),
         defectQty: new Prisma.Decimal(defectQty),
         note: dto.note ?? '',
@@ -387,7 +423,7 @@ export class WorkCenterService {
         companyId: order.companyId,
         productionOrderId: order.id,
         stage: dto.stage,
-        result: defectQty > 0 ? 'failed' : 'passed',
+        result,
         checkedQty: new Prisma.Decimal(checkedQty),
         defectQty: new Prisma.Decimal(defectQty),
         note: dto.note ?? '',

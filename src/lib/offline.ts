@@ -1,4 +1,4 @@
-import { getCleanApiUrl } from './api';
+import { apiBaseUrl, getCleanApiUrl } from './api';
 
 export const OFFLINE_WRITE_MESSAGE =
   'Perubahan ini butuh koneksi internet. Anda sedang offline, jadi data tidak disimpan. Sambungkan internet lalu coba lagi.';
@@ -20,6 +20,10 @@ export function isNetworkError(err: unknown): boolean {
 export function isReadMethod(method: string): boolean {
   const m = method.toUpperCase();
   return m === 'GET' || m === 'HEAD' || m === 'OPTIONS';
+}
+
+function apiHost(origin: string | null): string {
+  return origin ?? (apiBaseUrl() || 'belum diatur');
 }
 
 function apiOrigin(): string | null {
@@ -66,7 +70,7 @@ export function installNetworkGuard(): void {
         throw new NetworkError(
           navigator.onLine === false
             ? 'Anda sedang offline. Menampilkan data terakhir bila tersedia; perubahan butuh koneksi.'
-            : NETWORK_ERROR_MESSAGE,
+            : `${NETWORK_ERROR_MESSAGE} (alamat API: ${apiHost(origin)}. Jika alamat ini salah atau diblokir CORS, perbaiki VITE_API_URL / CORS_ORIGIN.)`,
         );
       }
       throw err;

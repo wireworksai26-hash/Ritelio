@@ -1,6 +1,5 @@
-// Landing page publik — struktur & ritme editorial Maze style:
-// announcement bar → nav → hero kolase → globe statement → tab fitur →
-// marquee lime → core values → PRICING → logo wall → trust & security →
+// Landing page publik: announcement bar → nav → hero kolase → globe statement → tab fitur →
+// grid modul ERP → marquee lime → core values → pricing → cocok untuk → keamanan →
 // footer CTA → footer.
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
@@ -15,6 +14,7 @@ import { Hero } from '../components/landing/Hero';
 import { LandingFooter } from '../components/landing/LandingFooter';
 import { LandingNav } from '../components/landing/LandingNav';
 import { LogoWall } from '../components/landing/LogoWall';
+import { ModuleGrid } from '../components/landing/ModuleGrid';
 import { Pricing } from '../components/landing/Pricing';
 import { TrustSecurity } from '../components/landing/TrustSecurity';
 import { Reveal } from '../components/Reveal';
@@ -75,9 +75,9 @@ export default function Landing() {
       {showBar && (
         <div className="relative bg-charcoal text-paper">
           <p className="px-10 py-2.5 text-center text-body-sm">
-            Retalio Intelligence kini tersedia —{' '}
-            <a href="#harga" className="underline decoration-chartreuse underline-offset-4 font-medium">
-              coba +AI gratis 14 hari
+            Retalio kini mencakup akuntansi, pengadaan, manufaktur, dan SDM.{' '}
+            <a href="#modul" className="underline decoration-chartreuse underline-offset-4 font-medium">
+              Lihat semua modul
             </a>
           </p>
           <button
@@ -100,6 +100,10 @@ export default function Landing() {
           <Reveal duration={0.8} y={35}>
             <FeatureTabs />
           </Reveal>
+        </section>
+
+        <section id="modul" className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8 mt-20 lg:mt-28 scroll-mt-24">
+          <ModuleGrid />
         </section>
 
         <div className="mt-20 lg:mt-28">

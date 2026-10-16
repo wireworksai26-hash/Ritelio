@@ -38,6 +38,7 @@ export class ProcurementService {
   async listRequisitions(tenantId: string, query: ListRequisitionQueryDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.purchaseRequisition.findMany({
+      take: 500,
       where: {
         tenantId,
         companyId,
@@ -253,6 +254,8 @@ export class ProcurementService {
   /** Tandai sudah disubmit (menunggu persetujuan). */
   async submitRequisition(tenantId: string, id: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
+    const found = await this.prisma.purchaseRequisition.findFirst({ where: { id, tenantId, companyId }, select: { id: true } });
+    if (!found) throw new NotFoundException('Permintaan pembelian tidak ditemukan.');
     const claimed = await this.prisma.purchaseRequisition.updateMany({
       where: { id, tenantId, companyId, status: 'draft' },
       data: { status: 'submitted' },
@@ -268,6 +271,7 @@ export class ProcurementService {
   async listTransfers(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.stockTransfer.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: {
         fromWarehouse: { select: { id: true, code: true, name: true } },
@@ -532,7 +536,10 @@ export class ProcurementService {
     const grouped = new Map<string, { supplierId: string; warehouseId: string; items: ReorderSuggestion[] }>();
     const skipped: Array<{ sku: string; reason: string }> = [];
     for (const s of suggestions) {
-      const supplierId = opts.onlySupplierId ?? s.supplierId;
+      // onlySupplierId MEMBATASI ke satu pemasok (sesuai kontrak DTO), bukan memaksa semua
+      // barang dipesan ke pemasok itu: itu akan membuat PO untuk barang yang bukan miliknya.
+      if (opts.onlySupplierId && s.supplierId !== opts.onlySupplierId) continue;
+      const supplierId = s.supplierId;
       if (!supplierId) {
         skipped.push({ sku: s.sku, reason: 'produk belum punya pemasok utama' });
         continue;
@@ -769,6 +776,8 @@ export class ProcurementService {
   /** Riwayat skor supplier tersimpan, untuk membandingkan antar periode. */
   async vendorScorecardHistory(tenantId: string, supplierId: string, periods = 6) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
+    const supplier = await this.prisma.supplier.findFirst({ where: { id: supplierId, tenantId, companyId }, select: { id: true } });
+    if (!supplier) throw new NotFoundException('Pemasok tidak ditemukan.');
     return this.prisma.vendorPerformance.findMany({
       where: { tenantId, companyId, supplierId },
       orderBy: { periodStart: 'desc' },

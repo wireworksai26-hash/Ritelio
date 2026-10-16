@@ -2,7 +2,7 @@ import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nes
 import { Prisma } from '@prisma/client';
 import { Observable, from, of, switchMap, tap } from 'rxjs';
 import { PrismaService } from '../prisma.service';
-import { redactSecrets } from '../utils/redact';
+import { sanitizeForAudit } from '../utils/redact';
 
 const METHOD_ACTION: Record<string, string> = {
   POST: 'create',
@@ -10,9 +10,6 @@ const METHOD_ACTION: Record<string, string> = {
   PUT: 'update',
   DELETE: 'delete',
 };
-
-/** Kolom berat yang tidak pernah ditulis ke audit_logs. */
-const HEAVY_FIELDS = new Set(['passwordHash', 'password', 'token', 'refreshToken', 'body']);
 
 interface AuditRequest {
   method: string;
@@ -81,7 +78,7 @@ export class AuditInterceptor implements NestInterceptor {
       if (!delegate) return undefined;
       const row = await delegate.findFirst({ where: { tenantId, id: entityId } });
       if (!row) return undefined;
-      return redactSecrets(stripHeavy(row)) as Prisma.InputJsonValue;
+      return sanitizeForAudit(row) as Prisma.InputJsonValue;
     } catch {
       return undefined;
     }
@@ -100,7 +97,8 @@ export class AuditInterceptor implements NestInterceptor {
     error?: unknown,
   ): void {
     try {
-      const after = this.serialize(redactSecrets(stripHeavy(req.body)));
+      // Rute /auth/* membawa kata sandi & OTP: isi body tidak pernah dicatat sama sekali.
+      const after = route.startsWith('auth/') ? undefined : this.serialize(sanitizeForAudit(req.body));
       const createdId =
         outcome === 'success' && result && typeof result === 'object' && 'id' in result
           ? String((result as { id: unknown }).id).slice(0, 64)
@@ -162,22 +160,9 @@ function headerValue(req: AuditRequest, name: string): string | null {
   return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
 }
 
+/** req.ip sudah menghormati `trust proxy`; X-Forwarded-For mentah bisa dipalsukan klien. */
 function clientIp(req: AuditRequest): string | null {
-  const forwarded = headerValue(req, 'x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0].trim();
   return req.ip ?? null;
-}
-
-function stripHeavy(value: unknown, depth = 0): unknown {
-  if (depth > 4 || value === null || typeof value !== 'object') return value;
-  if (value instanceof Date) return value.toISOString();
-  if (Array.isArray(value)) return value.slice(0, 20).map((v) => stripHeavy(v, depth + 1));
-  const out: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-    if (HEAVY_FIELDS.has(key)) continue;
-    out[key] = stripHeavy(val, depth + 1);
-  }
-  return out;
 }
 
 function shortError(error: unknown): string {

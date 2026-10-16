@@ -4,7 +4,7 @@
 // Aturan (mengikuti PRD/App Flow):
 // - owner   : akses penuh ('*')
 // - admin   : operasional + konfigurasi modul, TANPA finansial sensitif
-// - manager : inventori + purchasing + POS + laporan keuangan (read) + AI
+// - manager : inventori + purchasing + POS + laporan keuangan (read) + keputusan approval + AI
 // - cashier : hanya POS + notifikasi terbatas
 // - staff   : minimal; izin tambahan via kolom users.permissions (JSONB override)
 //
@@ -22,6 +22,7 @@ export type Permission =
   | 'pos:write'
   | 'finance:read'
   | 'finance:write'
+  | 'approvals:decide'
   | 'ai:use'
   | 'users:manage'
   | 'settings:write'
@@ -39,6 +40,7 @@ export const ALL_PERMISSIONS: Permission[] = [
   'pos:write',
   'finance:read',
   'finance:write',
+  'approvals:decide',
   'ai:use',
   'users:manage',
   'settings:write',
@@ -93,6 +95,8 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'pos:read',
     'pos:write',
     'finance:read',
+    // Boleh memutuskan tahap approval, tetapi TANPA finance:write.
+    'approvals:decide',
     'ai:use',
     'notifications:read',
     'outlets:read',

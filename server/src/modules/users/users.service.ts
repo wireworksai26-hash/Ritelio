@@ -27,6 +27,9 @@ const USER_SELECT = {
   outlets: { select: { outlet: { select: { id: true, name: true } } } },
 } satisfies Prisma.UserSelect;
 
+/** Batas pengaman daftar tanpa paginasi (tenant UKM jarang mendekatinya). */
+const MAX_LIST_ROWS = 500;
+
 /** Owner aktif terakhir tidak boleh kehilangan role owner-nya. */
 async function assertNotLastActiveOwner(
   prisma: PrismaService,
@@ -63,6 +66,7 @@ export class UsersService {
       where: { tenantId },
       select: USER_SELECT,
       orderBy: { createdAt: 'asc' },
+      take: MAX_LIST_ROWS,
     });
   }
 
@@ -191,8 +195,12 @@ export class UsersService {
       return user;
     }
 
-    const result = await this.prisma.user.updateMany({ where: { id, tenantId }, data });
-    if (result.count !== 1) throw new NotFoundException('Pengguna tidak ditemukan.');
+    // update() (bukan updateMany) karena data bisa memuat relasi databaseRole.connect;
+    // updateMany menolaknya sehingga perubahan role selalu gagal.
+    await this.prisma.user.update({ where: { id, tenantId }, data }).catch((err: { code?: string }) => {
+      if (err?.code === 'P2025') throw new NotFoundException('Pengguna tidak ditemukan.');
+      throw err;
+    });
     await this.revokeIfPrivilegesChanged(id, fields);
     return this.prisma.user.findFirstOrThrow({ where: { id, tenantId }, select: USER_SELECT });
   }

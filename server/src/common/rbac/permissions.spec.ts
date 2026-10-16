@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canAssignRole, roleHasPermission, sanitizePermissionOverrides } from './permissions';
+import { ALL_PERMISSIONS, ROLE_PERMISSIONS, canAssignRole, roleHasPermission, sanitizePermissionOverrides } from './permissions';
 
 describe('database RBAC helpers', () => {
   it('keeps role hierarchy from granting an equal or higher role to managed users', () => {
@@ -17,5 +17,28 @@ describe('database RBAC helpers', () => {
     expect(sanitizePermissionOverrides({ 'pos:read': true, all: true, 'finance:read': 'yes' })).toEqual({
       'pos:read': true,
     });
+  });
+});
+
+describe('approvals:decide', () => {
+  it('ada di katalog izin dan diberikan ke manager serta owner', () => {
+    expect(ALL_PERMISSIONS).toContain('approvals:decide');
+    expect(roleHasPermission('manager', {}, 'approvals:decide')).toBe(true);
+    expect(roleHasPermission('owner', {}, 'approvals:decide')).toBe(true);
+  });
+
+  it('manager tidak mendapat finance:write sebagai gantinya', () => {
+    expect(roleHasPermission('manager', {}, 'finance:write')).toBe(false);
+    expect(ROLE_PERMISSIONS.manager).not.toContain('finance:write');
+  });
+
+  it('cashier, staff, dan admin tidak boleh memutuskan approval', () => {
+    for (const role of ['cashier', 'staff', 'admin']) {
+      expect(roleHasPermission(role, {}, 'approvals:decide'), role).toBe(false);
+    }
+  });
+
+  it('override deny mencabut izin dari manager', () => {
+    expect(roleHasPermission('manager', { 'approvals:decide': false }, 'approvals:decide')).toBe(false);
   });
 });

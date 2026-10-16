@@ -74,6 +74,7 @@ function setup(applicantOver: Row = {}, postingOver: Row = {}, hiredElsewhere = 
     employees: [] as Row[],
     users: [] as Row[],
     interleave: undefined as undefined | (() => void),
+    hasStaffRole: true,
   };
   const applicantApi = {
     findFirst: async () => ({ ...state.applicant, jobPosting: { ...state.posting, position: null, department: null } }),
@@ -87,10 +88,12 @@ function setup(applicantOver: Row = {}, postingOver: Row = {}, hiredElsewhere = 
       state.applicant = { ...state.applicant, ...data };
       return state.applicant;
     },
+    findUniqueOrThrow: async () => state.applicant,
     count: async () => hiredElsewhere + (state.applicant.stage === 'hired' ? 1 : 0),
   };
   const tx = {
     applicant: applicantApi,
+    accessRole: { findFirst: async () => (state.hasStaffRole ? { id: 'role-staff' } : null) },
     user: { create: async ({ data }: { data: Row }) => { state.users.push(data); return { id: 'u-1' }; } },
     employee: { create: async ({ data }: { data: Row }) => { state.employees.push(data); return { id: 'emp-1', ...data }; } },
     jobPosting: { update: async ({ data }: { data: Row }) => { state.posting = { ...state.posting, ...data }; } },
@@ -129,9 +132,17 @@ describe('RecruitmentService.hire', () => {
   it('createUser membuat akun dan menautkan userId ke Employee', async () => {
     const { state, service } = setup();
     const r = await service.hire('t1', 'ap-1', { baseSalary: 5_000_000, createUser: true });
-    expect(state.users[0]).toMatchObject({ email: 'sari@x.id', name: 'Sari' });
+    // roleId wajib FK ke peran 'staff' tenant: string kosong membuat hire gagal 500 di DB nyata.
+    expect(state.users[0]).toMatchObject({ email: 'sari@x.id', name: 'Sari', roleId: 'role-staff', role: 'staff' });
     expect(r.userId).toBe('u-1');
     expect(state.employees[0].userId).toBe('u-1');
+  });
+
+  it('createUser tanpa peran staff di tenant ditolak jelas (400) dan tidak membuat Employee', async () => {
+    const { state, service } = setup();
+    state.hasStaffRole = false;
+    await expect(service.hire('t1', 'ap-1', { baseSalary: 5_000_000, createUser: true })).rejects.toBeInstanceOf(BadRequestException);
+    expect(state.employees).toHaveLength(0);
   });
 
   it('hire kedua kali ditolak dan tidak membuat Employee kedua', async () => {

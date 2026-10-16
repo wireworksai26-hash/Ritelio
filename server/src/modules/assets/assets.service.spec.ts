@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeDepreciation } from './assets.service';
+import { computeDepreciation, depreciationEntryDate } from './assets.service';
 
 describe('computeDepreciation', () => {
   it('garis lurus: (harga - nilai sisa) / masa manfaat', () => {
@@ -48,8 +48,8 @@ describe('computeDepreciation', () => {
     expect(dep).toBe(1);
   });
 
-  it('saldo menurun: nilai buku x tingkat', () => {
-    // nilai buku 100 juta x 25% = 25 juta
+  it('saldo menurun: tingkat TAHUNAN dibagi 12 per bulan', () => {
+    // nilai buku 100 juta x 25% / 12 = 2.083.333,33 (bukan 25 juta per bulan)
     expect(
       computeDepreciation(
         {
@@ -61,11 +61,11 @@ describe('computeDepreciation', () => {
         },
         0,
       ),
-    ).toBe(25_000_000);
+    ).toBe(2_083_333.33);
   });
 
   it('saldo menurun: berbasis nilai buku tersisa, bukan harga perolehan', () => {
-    // buku tersisa 60 juta x 25% = 15 juta
+    // buku tersisa 60 juta x 25% / 12 = 1.250.000
     expect(
       computeDepreciation(
         {
@@ -77,12 +77,12 @@ describe('computeDepreciation', () => {
         },
         40_000_000,
       ),
-    ).toBe(15_000_000);
+    ).toBe(1_250_000);
   });
 
   it('saldo menurun: tidak turun di bawah nilai sisa', () => {
     // nilai buku 1.000.000 - 99.000 = 901.000; dikurangi nilai sisa 900.000
-    // menyisakan 1.000 untuk disusutkan, x 50% = 500.
+    // menyisakan 1.000 untuk disusutkan, x 50% / 12 = 41,67 (tidak pernah melebihi sisa).
     const dep = computeDepreciation(
       {
         acquisitionCost: 1_000_000,
@@ -93,7 +93,7 @@ describe('computeDepreciation', () => {
       },
       99_000,
     );
-    expect(dep).toBe(500);
+    expect(dep).toBe(41.67);
   });
 
   it('saldo menurun: berhenti tepat saat mencapai nilai sisa', () => {
@@ -119,5 +119,30 @@ describe('computeDepreciation', () => {
         0,
       ),
     ).toBe(0);
+  });
+
+  it('saldo menurun 24%/tahun pada 10 juta: bulan pertama 200.000', () => {
+    expect(
+      computeDepreciation(
+        { acquisitionCost: 10_000_000, salvageValue: 0, usefulLifeMonths: 60, depreciationMethod: 'declining_balance', decliningRate: 0.24 },
+        0,
+      ),
+    ).toBe(200_000);
+  });
+});
+
+describe('depreciationEntryDate', () => {
+  const start = new Date('2026-04-01T00:00:00Z');
+  const end = new Date('2026-05-01T00:00:00Z');
+
+  it('periode lampau: hari terakhir periode, di dalam [start, end)', () => {
+    const d = depreciationEntryDate(start, end, new Date('2026-10-12T10:00:00Z'));
+    expect(d.toISOString()).toBe('2026-04-30T00:00:00.000Z');
+    expect(d >= start && d < end).toBe(true);
+  });
+
+  it('periode berjalan: dibatasi hari ini', () => {
+    const now = new Date('2026-04-12T10:00:00Z');
+    expect(depreciationEntryDate(start, end, now).toISOString()).toBe(now.toISOString());
   });
 });

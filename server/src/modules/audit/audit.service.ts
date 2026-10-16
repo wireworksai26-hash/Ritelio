@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
-import { redactSecrets } from '../../common/utils/redact';
+import { sanitizeForAudit } from '../../common/utils/redact';
 
 export interface AuditEntry {
   tenantId: string;
@@ -31,6 +31,18 @@ export interface AuditQuery {
 }
 
 /**
+ * Saring before/after saat dibaca. Baris yang ditulis sebelum aturan redaksi ada
+ * mungkin masih memuat secret, jadi penyaringan saat tulis saja tidak cukup.
+ */
+export function redactAuditRow<T extends { before?: unknown; after?: unknown }>(row: T): T {
+  return {
+    ...row,
+    before: sanitizeForAudit(row.before) ?? null,
+    after: sanitizeForAudit(row.after) ?? null,
+  };
+}
+
+/**
  * Baca + tulis jejak audit. Semua service yang butuh mencatat peristiwa
  * non-HTTP (login gagal, settlement, sensor IoT) memakai `record()` di sini
  * supaya satu tempat yang menentukan bentuk catatannya.
@@ -51,8 +63,10 @@ export class AuditService {
         reason: entry.reason ?? null,
         ipAddress: entry.ipAddress ?? null,
         userAgent: entry.userAgent ?? null,
-        before: entry.before ?? undefined,
-        after: entry.after ?? undefined,
+        // Pertahanan berlapis: apa pun yang dikirim pemanggil disaring sebelum disimpan.
+        before: (sanitizeForAudit(entry.before) as Prisma.InputJsonValue | null | undefined) ?? undefined,
+        after: (sanitizeForAudit(entry.after) as Prisma.InputJsonValue | null | undefined) ?? undefined,
+        // reason bisa memuat pesan error mentah; batasi panjang dan redaksi.
       },
     });
   }
@@ -91,17 +105,18 @@ export class AuditService {
 
     const total = await this.prisma.auditLog.count({ where });
     return {
-      data: rows.map((row) => ({ ...row, after: redactSecrets(row.after) })),
+      data: rows.map((row) => redactAuditRow(row)),
       total,
       nextCursor: rows.length === take ? rows[rows.length - 1]?.id : null,
     };
   }
 
   async detail(tenantId: string, id: string) {
-    return this.prisma.auditLog.findFirst({
+    const row = await this.prisma.auditLog.findFirst({
       where: { id, tenantId },
       include: { user: { select: { id: true, email: true, name: true, role: true } } },
     });
+    return row ? redactAuditRow(row) : null;
   }
 
   /** Daftar entitas + aksi yang tercatat, untuk mengisi filter UI. */

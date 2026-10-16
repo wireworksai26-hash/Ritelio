@@ -5,7 +5,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
-  IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -29,13 +29,14 @@ export class CreateWorkCenterDto {
   name!: string;
 
   @IsOptional()
-  @IsEnum(WORK_CENTER_KINDS)
+  @IsIn(WORK_CENTER_KINDS)
   kind?: (typeof WORK_CENTER_KINDS)[number];
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(999_999_999_999)
   capacityPerDay?: number;
 
   @IsOptional()
@@ -49,6 +50,7 @@ export class CreateWorkCenterDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(999_999_999_999)
   hourlyRate?: number;
 
   @IsOptional()
@@ -106,7 +108,7 @@ export class ProposeScheduleDto {
 }
 
 export class CreateQcStageDto {
-  @IsEnum(QC_STAGES)
+  @IsIn(QC_STAGES)
   stage!: (typeof QC_STAGES)[number];
 
   @IsOptional()
@@ -131,23 +133,58 @@ export class ConfigureQcStagesDto {
 }
 
 export class RecordQcDto {
-  @IsEnum(QC_STAGES)
+  @IsIn(QC_STAGES)
   stage!: (typeof QC_STAGES)[number];
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(999_999_999_999)
   checkedQty?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(999_999_999_999)
   defectQty?: number;
 
   @IsOptional()
   @IsString()
   @Length(0, 500)
   note?: string;
+}
+
+/** PATCH work center: semua field opsional (kode tidak bisa diubah). */
+export class UpdateWorkCenterDto {
+  @IsOptional()
+  @IsString()
+  @Length(2, 120)
+  name?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(999_999_999_999)
+  capacityPerDay?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1440)
+  capacityMinutes?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(999_999_999_999)
+  hourlyRate?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

@@ -49,9 +49,9 @@ export class TaxRulesService {
           source: dto.source ?? 'estimate',
           brackets: dto.brackets?.length
             ? {
+                // tenantId/companyId sengaja tidak diisi: FK komposit (tenantId, companyId, taxRuleId)
+                // diturunkan Prisma dari rule induk, dan menyertakannya membuat create ditolak.
                 create: dto.brackets.map((b, i) => ({
-                  tenantId,
-                  companyId,
                   sortOrder: i + 1,
                   lowerBound: new Prisma.Decimal(b.lowerBound),
                   upperBound: b.upperBound === undefined || b.upperBound === null ? null : new Prisma.Decimal(b.upperBound),

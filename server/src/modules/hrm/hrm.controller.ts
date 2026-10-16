@@ -95,6 +95,14 @@ export class HrmController {
     return this.hrm.requestLeave(tenantId, dto.employeeId, dto);
   }
 
+  /** Saldo cuti tahunan (hak 12 hari kerja; terpakai/menunggu/sisa). */
+  @Get('employees/:id/leave-balance')
+  @RequirePermissions('settings:write')
+  leaveBalance(@Tenant() tenantId: string, @Param('id') id: string, @Query('year') year?: string) {
+    const y = year ? Number(year) : undefined;
+    return this.hrm.leaveBalance(tenantId, id, y !== undefined && Number.isInteger(y) && y > 1970 && y < 2200 ? y : undefined);
+  }
+
   @Post('leaves/:id/decide')
   @RequirePermissions('settings:write')
   decideLeave(

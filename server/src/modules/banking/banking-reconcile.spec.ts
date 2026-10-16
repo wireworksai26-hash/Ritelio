@@ -177,3 +177,34 @@ describe('BankingService.reconcile — tautan jurnal', () => {
     expect(prisma.bankStatement.updateMany.mock.calls[0][0].data).not.toHaveProperty('matchedJournalId');
   });
 });
+
+describe('BankingService.createAccount validasi akun kas/bank', () => {
+  function make(account: { id: string; code: string; type: string } | null, children = 0) {
+    const prisma = {
+      company: { findFirst: vi.fn().mockResolvedValue({ id: COMPANY }) },
+      chartOfAccount: {
+        findFirst: vi.fn().mockResolvedValue(account),
+        count: vi.fn().mockResolvedValue(children),
+      },
+      bankAccount: { create: vi.fn().mockResolvedValue({ id: 'b1' }) },
+    };
+    return { service: new BankingService(prisma as never, {} as never), prisma };
+  }
+
+  it('menolak rekening yang ditautkan ke akun pendapatan', async () => {
+    const { service, prisma } = make({ id: 'a', code: '4000', type: 'revenue' });
+    await expect(service.createAccount(TENANT, { code: 'BCA', name: 'BCA', accountCode: '4000' })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.bankAccount.create).not.toHaveBeenCalled();
+  });
+
+  it('menolak akun induk', async () => {
+    const { service } = make({ id: 'a', code: '1000', type: 'asset' }, 2);
+    await expect(service.createAccount(TENANT, { code: 'BCA', name: 'BCA' })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('menerima akun aset detail', async () => {
+    const { service, prisma } = make({ id: 'a', code: '1000', type: 'asset' });
+    await service.createAccount(TENANT, { code: 'BCA', name: 'BCA' });
+    expect(prisma.bankAccount.create).toHaveBeenCalled();
+  });
+});

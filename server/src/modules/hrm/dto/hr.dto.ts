@@ -4,7 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
-  IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -74,7 +74,7 @@ export class CreateEmployeeDto {
   managerId?: string;
 
   @IsOptional()
-  @IsEnum(EMPLOYMENT_TYPES)
+  @IsIn(EMPLOYMENT_TYPES)
   employmentType?: (typeof EMPLOYMENT_TYPES)[number];
 
   @IsDateString()
@@ -108,7 +108,7 @@ export class CreateAttendanceDto {
   date!: string;
 
   @IsOptional()
-  @IsEnum(ATTENDANCE_STATUSES)
+  @IsIn(ATTENDANCE_STATUSES)
   status?: (typeof ATTENDANCE_STATUSES)[number];
 
   @IsOptional()
@@ -239,7 +239,7 @@ export class LeaveRequestDto {
 
 export class ListLeavesQueryDto {
   @IsOptional()
-  @IsEnum(['pending', 'approved', 'rejected', 'cancelled'])
+  @IsIn(['pending', 'approved', 'rejected', 'cancelled'])
   status?: 'pending' | 'approved' | 'rejected' | 'cancelled';
 }
 

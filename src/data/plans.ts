@@ -1,7 +1,9 @@
 // Definisi paket subscription Retalio (frontend-first).
-// - Basic  : SBS standar tanpa AI
+// - Basic  : kasir, inventori, dan laporan keuangan tanpa AI
 // - +AI    : semua fitur Basic + Retalio Intelligence (kuota AI bulanan)
-// - Custom : semua + kapabilitas advance (SSO, audit, integrasi, SLA)
+// - Custom : semua + modul ERP lengkap dan kapabilitas advance
+// Catatan: pembatasan modul ERP per paket belum ditegakkan di aplikasi. Daftar fitur di sini
+// adalah materi penjualan, bukan kontrol akses.
 import type { SubscriptionPlan } from '../types';
 
 export interface Plan {
@@ -20,7 +22,7 @@ export const plans: Plan[] = [
   {
     id: 'basic',
     name: 'Basic',
-    tagline: 'SBS standar untuk operasional inti — tanpa AI.',
+    tagline: 'Kasir, inventori, dan laporan keuangan untuk operasional inti.',
     monthlyPrice: 149000,
     yearlyPrice: 119000,
     features: [
@@ -36,7 +38,7 @@ export const plans: Plan[] = [
   {
     id: 'plus_ai',
     name: '+AI',
-    tagline: 'Semua fitur Basic, plus Retalio Intelligence.',
+    tagline: 'Semua fitur Basic, ditambah Retalio Intelligence.',
     monthlyPrice: 349000,
     yearlyPrice: 279000,
     badge: 'Retalio Intelligence',
@@ -62,11 +64,11 @@ export const plans: Plan[] = [
     features: [
       'Semua fitur +AI',
       'Outlet & pengguna tanpa batas',
-      'Modul advance: Produksi & Booking',
+      'Modul ERP lengkap: akuntansi, pengadaan, manufaktur, SDM & payroll, proyek, logistik, IoT',
+      'Multi-perusahaan dan multi-mata uang',
       'Custom workflow, field & integrasi API',
-      'SSO, 2FA & audit log penuh',
+      'Audit log penuh dan 2FA',
       'Dukungan prioritas + SLA',
-      'Akses awal fitur Fase 2',
     ],
     cta: 'Hubungi Sales',
   },

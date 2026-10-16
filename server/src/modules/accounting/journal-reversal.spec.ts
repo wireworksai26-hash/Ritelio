@@ -6,7 +6,7 @@ import { JournalService } from './journal.service';
  * Reversal dijaga di dalam JournalService dengan memuat jurnal asal lebih dulu,
  * jadi guard bisa diuji tanpa database: cukup kontrol apa yang findFirst kembalikan.
  */
-function mockTx(journal: Record<string, unknown> | null) {
+function mockTx(journal: Record<string, unknown> | null, claimCount = 1) {
   const created: Record<string, unknown>[] = [];
   const updates: Record<string, unknown>[] = [];
   const lines: Record<string, unknown>[] = [];
@@ -21,6 +21,10 @@ function mockTx(journal: Record<string, unknown> | null) {
       update: async ({ data }: { data: Record<string, unknown> }) => {
         updates.push(data);
         return journal;
+      },
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+        if (claimCount === 1) updates.push(data);
+        return { count: claimCount };
       },
       findUniqueOrThrow: async () => ({ id: 'jurnal-baru', lines: [] }),
       findFirst: async () => journal,
@@ -94,5 +98,13 @@ describe('JournalService.reverse', () => {
     await expect(
       new JournalService({} as never).reverse(tx as never, { ...base, journalId: 'j1' }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('menolak bila klaim atomik kalah dari pembalikan paralel (tidak membuat jurnal pembalik kedua)', async () => {
+    const { tx, created } = mockTx(posted, 0);
+    await expect(
+      new JournalService({} as never).reverse(tx as never, { ...base, journalId: 'j1' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(created).toHaveLength(0);
   });
 });

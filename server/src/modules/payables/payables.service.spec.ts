@@ -191,33 +191,53 @@ describe('PayablesService.payBill status', () => {
   // Regresi: status dulu dibandingkan dengan SISA tagihan, bukan total.
   // Tagihan 100 yang sudah dibayar 40, lalu dibayar 30, ditandai "paid"
   // padahal masih tersisa 30.
-  function payDeps(bill: { total: number; paidAmount: number }) {
+  // Meniru Postgres: SELECT ... FOR UPDATE membuat transaksi lain menunggu sampai commit,
+  // dan baris dibaca ulang setelah kunci didapat.
+  function payDeps(bill: { total: number; paidAmount: number; taxTotal?: number }) {
+    const row: Record<string, any> = { id: 'b1', number: 'AP-1', supplierId: 's1', status: bill.paidAmount > 0 ? 'partial' : 'open', taxTotal: 0, ...bill };
     const updates: Array<{ paidAmount: unknown; status: string }> = [];
-    const tx = {
-      documentSequence: { upsert: async () => ({ nextValue: 2 }) },
-      vendorPayment: {
-        findFirst: async () => null,
-        create: async ({ data }: { data: unknown }) => data,
-      },
-      vendorBill: {
-        update: async ({ data }: { data: { paidAmount: unknown; status: string } }) => {
-          updates.push(data);
-          return data;
-        },
-      },
-    };
-    const prisma = {
-      $transaction: async (fn: (t: unknown) => Promise<unknown>) => fn(tx),
+    let chain: Promise<void> = Promise.resolve();
+    const prisma: Record<string, any> = {
       company: { findFirst: async () => ({ id: 'c1' }) },
-      vendorBill: {
-        findFirst: async () => ({ id: 'b1', number: 'AP-1', supplierId: 's1', status: 'partial', ...bill }),
-      },
       chartOfAccount: {
         findFirst: async (args: { where: { code: string } }) => ({ id: `acc-${args.where.code}` }),
       },
     };
+    prisma['$transaction'] = async (fn: (t: unknown) => Promise<unknown>) => {
+      let release!: () => void;
+      const done = new Promise<void>((r) => (release = r));
+      const prev = chain;
+      chain = prev.then(() => done);
+      let locked = false;
+      const tx = {
+        $queryRaw: async (strings: TemplateStringsArray) => {
+          expect(strings.join('?')).toContain('FOR UPDATE');
+          await prev;
+          locked = true;
+        },
+        documentSequence: { upsert: async () => ({ nextValue: 2 }) },
+        vendorPayment: { findFirst: async () => null, create: async ({ data }: { data: unknown }) => data },
+        vendorBill: {
+          findFirst: async () => {
+            if (!locked) throw new Error('faktur dibaca tanpa kunci');
+            return { ...row };
+          },
+          update: async ({ data }: { data: { paidAmount: unknown; status: string } }) => {
+            updates.push(data);
+            row.paidAmount = Number(data.paidAmount);
+            row.status = data.status;
+            return data;
+          },
+        },
+      };
+      try {
+        return await fn(tx);
+      } finally {
+        release();
+      }
+    };
     const journals = { post: async () => ({ id: 'j1' }) };
-    return { service: new PayablesService(prisma as never, journals as never, {} as never), updates };
+    return { service: new PayablesService(prisma as never, journals as never, {} as never), updates, row };
   }
 
   it('bayar sebagian pada tagihan yang sudah sebagian lunas tetap "partial"', async () => {
@@ -236,5 +256,24 @@ describe('PayablesService.payBill status', () => {
   it('menolak pembayaran melebihi sisa', async () => {
     const { service } = payDeps({ total: 100, paidAmount: 40 });
     await expect(service.payBill('t1', 'b1', { amount: 61 })).rejects.toThrow(BadRequestException);
+  });
+
+  it('nilai yang dilunasi adalah gross (DPP + PPN): taxTotal 111 -> sisa 111, bukan 100', async () => {
+    const { service, row } = payDeps({ total: 100, paidAmount: 0, taxTotal: 111 });
+    await expect(service.payBill('t1', 'b1', { amount: 111.01 })).rejects.toThrow(BadRequestException);
+    const res = await service.payBill('t1', 'b1', { amount: 111 });
+    expect(res.billStatus).toBe('paid');
+    expect(row.paidAmount).toBe(111);
+  });
+
+  it('pembayaran paralel pada sisa yang cukup untuk satu saja: hanya satu berhasil', async () => {
+    const { service, row } = payDeps({ total: 100, paidAmount: 50 });
+    const results = await Promise.allSettled(
+      Array.from({ length: 10 }, () => service.payBill('t1', 'b1', { amount: 50 })),
+    );
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(9);
+    expect(row.paidAmount).toBe(100);
+    expect(row.status).toBe('paid');
   });
 });

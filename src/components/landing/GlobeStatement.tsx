@@ -46,7 +46,7 @@ export function GlobeStatement() {
       </div>
       <Reveal className="relative text-center max-w-3xl mx-auto px-6" duration={0.8} y={35}>
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-black/10 bg-white/80 backdrop-blur-xs text-[13px] text-[#1c1c1c] font-medium mb-6 shadow-xs">
-          Arsitektur Terintegrasi
+          Satu sistem
         </div>
         <h2 className="font-light text-[#1c1c1c] text-[42px] leading-[1.04] tracking-[-2.4px] sm:text-display">
           Satu platform.
@@ -54,8 +54,8 @@ export function GlobeStatement() {
           Semua operasi.
         </h2>
         <p className="mt-6 text-[17px] sm:text-[19px] text-[#2d2d2d] leading-relaxed max-w-xl mx-auto font-normal">
-          POS, inventori, keuangan, dan AI saling terhubung sejak transaksi pertama —
-          tidak ada lagi data tersebar di lima spreadsheet.
+          Kasir, stok, pembelian, produksi, SDM, dan pembukuan memakai data yang sama.
+          Tidak ada lagi angka yang harus disamakan antar spreadsheet.
         </p>
       </Reveal>
     </section>

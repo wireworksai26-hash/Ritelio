@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -11,6 +12,7 @@ import { roundMoney } from '../../common/utils/money';
 import { JournalService } from '../accounting/journal.service';
 import { ApprovalService } from '../approvals/approval.service';
 import { ReceivablesService } from '../receivables/receivables.service';
+import { advisoryLock, isUniqueViolation } from '../inventory/tx-retry';
 import { claimShipmentStatus, type ShipmentStatusValue } from './shipment-status';
 import type {
   CreateProjectDto,
@@ -41,6 +43,7 @@ private readonly prisma: PrismaService,
   async listProjects(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.project.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: {
         customer: { select: { code: true, name: true } },
@@ -60,7 +63,18 @@ private readonly prisma: PrismaService,
       });
       if (!customer) throw new NotFoundException('Pelanggan tidak ditemukan.');
     }
-    return this.prisma.project.create({
+    if (dto.managerId) {
+      const manager = await this.prisma.employee.findFirst({
+        where: { id: dto.managerId, tenantId, companyId },
+        select: { id: true },
+      });
+      if (!manager) throw new NotFoundException('Manajer proyek tidak ditemukan.');
+    }
+    if (dto.startDate && dto.endDate && new Date(dto.endDate) < new Date(dto.startDate)) {
+      throw new BadRequestException('Tanggal selesai tidak boleh sebelum tanggal mulai.');
+    }
+    try {
+    return await this.prisma.project.create({
       data: {
         tenantId,
         companyId,
@@ -75,6 +89,10 @@ private readonly prisma: PrismaService,
       },
       include: { milestones: true },
     });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ConflictException(`Kode proyek "${dto.code}" sudah dipakai.`);
+      throw error;
+    }
   }
 
   async listMilestones(tenantId: string, projectId: string) {
@@ -138,28 +156,43 @@ private readonly prisma: PrismaService,
     dependsOnIds?: string[],
   ) {
     const project = await this.assertProject(tenantId, id);
-    const created = await this.prisma.projectMilestone.create({
-      data: {
-        tenantId: project.tenantId,
-        companyId: project.companyId,
-        projectId: project.id,
-        name,
-        startDate: startDate ? new Date(startDate) : null,
-        dueDate: dueDate ? new Date(dueDate) : null,
-      },
-    });
-    if (dependsOnIds && dependsOnIds.length > 0) {
-      await this.prisma.milestoneDependency.createMany({
-        data: dependsOnIds.map((depId) => ({
+    if (startDate && dueDate && new Date(dueDate) < new Date(startDate)) {
+      throw new BadRequestException('Tenggat tidak boleh sebelum tanggal mulai.');
+    }
+    const depIds = [...new Set(dependsOnIds ?? [])];
+    if (depIds.length > 0) {
+      // Dependensi harus milestone di PROYEK YANG SAMA; id asing/lintas proyek ditolak.
+      const found = await this.prisma.projectMilestone.count({
+        where: { id: { in: depIds }, tenantId: project.tenantId, companyId: project.companyId, projectId: project.id },
+      });
+      if (found !== depIds.length) {
+        throw new BadRequestException('Ada dependensi yang bukan milestone pada proyek ini.');
+      }
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.projectMilestone.create({
+        data: {
           tenantId: project.tenantId,
           companyId: project.companyId,
           projectId: project.id,
-          milestoneId: created.id,
-          dependsOnId: depId,
-        })),
+          name,
+          startDate: startDate ? new Date(startDate) : null,
+          dueDate: dueDate ? new Date(dueDate) : null,
+        },
       });
-    }
-    return created;
+      if (depIds.length > 0) {
+        await tx.milestoneDependency.createMany({
+          data: depIds.map((depId) => ({
+            tenantId: project.tenantId,
+            companyId: project.companyId,
+            projectId: project.id,
+            milestoneId: created.id,
+            dependsOnId: depId,
+          })),
+        });
+      }
+      return created;
+    });
   }
 
   /** Selesaikan milestone; dependensi yang belum selesai menghalangi. */
@@ -182,13 +215,13 @@ private readonly prisma: PrismaService,
       throw new BadRequestException('Progres harus antara 0 dan 100.');
     }
 
-    return this.prisma.projectMilestone.update({
-      where: { id: milestoneId },
-      data: {
-        progress,
-        completedAt: progress === 100 ? new Date() : null,
-      },
+    // Klaim bersyarat: dua penyelesaian bersamaan hanya berhasil sekali.
+    const claimed = await this.prisma.projectMilestone.updateMany({
+      where: { id: milestoneId, tenantId, companyId, completedAt: null },
+      data: { progress, completedAt: progress === 100 ? new Date() : null },
     });
+    if (claimed.count !== 1) throw new ConflictException(`Milestone "${milestone.name}" sudah selesai.`);
+    return this.prisma.projectMilestone.findUniqueOrThrow({ where: { id: milestoneId } });
   }
 
   async updateMilestone(
@@ -212,6 +245,18 @@ private readonly prisma: PrismaService,
     }
 
     const progress = dto.progress ?? milestone.progress;
+    if (progress === 100 && !milestone.completedAt) {
+      // Jalur ini juga bisa menyelesaikan milestone; dependensinya wajib dicek sama seperti complete.
+      const pending = await this.prisma.milestoneDependency.findMany({
+        where: { milestoneId, dependsOn: { completedAt: null } },
+        select: { dependsOn: { select: { name: true } } },
+      });
+      if (pending.length > 0) {
+        throw new ConflictException(
+          `Milestone bergantung pada yang belum selesai: ${pending.map((p) => p.dependsOn.name).join(', ')}.`,
+        );
+      }
+    }
     return this.prisma.projectMilestone.update({
       where: { id: milestoneId },
       data: {
@@ -232,8 +277,28 @@ private readonly prisma: PrismaService,
     });
     if (!employee) throw new NotFoundException('Employee tidak aktif atau tidak ditemukan.');
 
+    // Kolom work_date bertipe DATE: samakan ke awal hari UTC supaya kunci unik
+    // (karyawan, tanggal) cocok walau klien mengirim jam.
+    const workDate = new Date(dto.workDate);
+    workDate.setUTCHours(0, 0, 0, 0);
+    const where = { employeeId_workDate: { employeeId: dto.employeeId, workDate } };
+
+    // Timesheet yang sudah disetujui/ditagihkan tidak boleh ditimpa: menimpanya
+    // mengubah jam yang sudah jadi faktur (atau mereset persetujuannya).
+    const existing = await this.prisma.timesheet.findUnique({ where });
+    if (existing && (existing.status === 'approved' || existing.billedAt)) {
+      throw new ConflictException(
+        existing.billedAt
+          ? 'Timesheet tanggal ini sudah ditagihkan dan tidak bisa diubah.'
+          : 'Timesheet tanggal ini sudah disetujui dan tidak bisa diubah.',
+      );
+    }
+    if (existing && existing.projectId !== project.id && existing.status !== 'rejected') {
+      throw new ConflictException('Karyawan sudah mencatat jam untuk proyek lain pada tanggal ini.');
+    }
+
     return this.prisma.timesheet.upsert({
-      where: { employeeId_workDate: { employeeId: dto.employeeId, workDate: new Date(dto.workDate) } },
+      where,
       update: {
         projectId: project.id,
         hours: new Prisma.Decimal(dto.hours),
@@ -247,7 +312,7 @@ private readonly prisma: PrismaService,
         companyId: project.companyId,
         projectId: project.id,
         employeeId: dto.employeeId,
-        workDate: new Date(dto.workDate),
+        workDate,
         hours: new Prisma.Decimal(dto.hours),
         hourlyRate: new Prisma.Decimal(dto.hourlyRate ?? 0),
         billable: dto.billable ?? true,
@@ -257,9 +322,17 @@ private readonly prisma: PrismaService,
   }
 
   async approveTimesheet(tenantId: string, id: string, approverId: string) {
-const sheet = await this.assertTimesheet(tenantId, id);
+    const sheet = await this.assertTimesheet(tenantId, id);
     if (sheet.status !== 'submitted') {
       throw new ConflictException(`Timesheet sudah berstatus ${sheet.status}.`);
+    }
+    // Pemisahan kewenangan: pemilik timesheet (karyawan yang tertaut ke akun penyetuju) tidak menyetujui jamnya sendiri.
+    const owner = await this.prisma.employee.findFirst({
+      where: { id: sheet.employeeId, tenantId: sheet.tenantId },
+      select: { userId: true },
+    });
+    if (owner?.userId && owner.userId === approverId) {
+      throw new ForbiddenException('Anda tidak boleh menyetujui timesheet Anda sendiri.');
     }
 
     // Timesheet billable ikut alur approval supaya tidak bisa ditagihkan ke
@@ -284,10 +357,12 @@ const sheet = await this.assertTimesheet(tenantId, id);
         });
     }
 
-    return this.prisma.timesheet.update({
-      where: { id },
+    const claimed = await this.prisma.timesheet.updateMany({
+      where: { id, tenantId, status: 'submitted' },
       data: { status: 'approved', approvedById: approverId, approvedAt: new Date() },
     });
+    if (claimed.count !== 1) throw new ConflictException('Timesheet sudah diputuskan oleh permintaan lain.');
+    return this.prisma.timesheet.findUniqueOrThrow({ where: { id } });
   }
 
   /** Rekap biaya proyek dari timesheet yang sudah disetujui. */
@@ -347,6 +422,14 @@ const sheet = await this.assertTimesheet(tenantId, id);
     filter: { projectId?: string; employeeId?: string; status?: string; from?: string; to?: string; take?: number },
   ) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
+    // Status 'draft' diterima DTO tapi tidak ada pada enum DB (timesheet langsung 'submitted'):
+    // hasilnya selalu kosong, bukan error Prisma.
+    if (filter.status === 'draft') {
+      return {
+        data: [],
+        totals: { hours: 0, billableHours: 0, billableAmount: 0, unbilledAmount: 0, sheets: 0, pending: 0, billed: 0 },
+      };
+    }
     const rows = await this.prisma.timesheet.findMany({
       where: {
         tenantId,
@@ -427,10 +510,10 @@ const sheet = await this.assertTimesheet(tenantId, id);
     const customer = project.customer;
     if (!customer) throw new BadRequestException('Data pelanggan proyek tidak ditemukan.');
 
-    const amount = roundMoney(
+    const preview = roundMoney(
       project.timesheets.reduce((s, r) => s + Number(r.hours) * Number(r.hourlyRate), 0),
     );
-    if (amount <= 0) {
+    if (preview <= 0) {
       throw new BadRequestException(
         'Tidak ada timesheet billable yang sudah disetujui dan belum pernah ditagihkan.',
       );
@@ -444,17 +527,27 @@ const sheet = await this.assertTimesheet(tenantId, id);
 
     return this.prisma.$transaction(async (tx) => {
       // Klaim baris secara atomik per timesheet supaya dua permintaan yang
-      // bersamaan tidak bisa memilih set jam yang sama.
+      // bersamaan tidak bisa memilih set jam yang sama. Nilai tagihan dihitung
+      // dari baris yang BENAR-BENAR diklaim, bukan dari daftar yang dibaca sebelum
+      // transaksi (yang bisa sudah ditagih permintaan lain).
       const claimed: string[] = [];
+      let claimedAmount = 0;
       for (const sheet of project.timesheets) {
         const result = await tx.timesheet.updateMany({
-          where: { id: sheet.id, billedAt: null },
+          where: { id: sheet.id, billedAt: null, status: 'approved', billable: true },
           data: { billedAt: new Date() },
         });
-        if (result.count === 1) claimed.push(sheet.id);
+        if (result.count === 1) {
+          claimed.push(sheet.id);
+          claimedAmount += roundMoney(Number(sheet.hours) * Number(sheet.hourlyRate));
+        }
       }
       if (claimed.length === 0) {
         throw new ConflictException('Seluruh timesheet proyek ini sudah pernah ditagihkan.');
+      }
+      const amount = roundMoney(claimedAmount);
+      if (amount <= 0) {
+        throw new BadRequestException('Tarif per jam timesheet bernilai 0, tidak ada yang bisa ditagihkan.');
       }
 
       const entryDate = new Date();
@@ -515,6 +608,7 @@ const sheet = await this.assertTimesheet(tenantId, id);
   async listShipments(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.shipment.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: {
         outlet: { select: { name: true } },
@@ -531,6 +625,17 @@ const sheet = await this.assertTimesheet(tenantId, id);
     // jalur internal sehingga tidak boleh bergantung pada ValidationPipe saja.
     if (dto.items.length === 0) throw new BadRequestException('Shipment minimal satu item.');
     await this.assertProducts(tenantId, dto.items.map((i) => i.productId));
+    if (dto.outletId) {
+      const outlet = await this.prisma.outlet.findFirst({ where: { id: dto.outletId, tenantId }, select: { id: true } });
+      if (!outlet) throw new NotFoundException('Outlet tidak ditemukan.');
+    }
+    if (dto.vehicleId) {
+      const vehicle = await this.prisma.vehicle.findFirst({ where: { id: dto.vehicleId, tenantId, companyId }, select: { id: true } });
+      if (!vehicle) throw new NotFoundException('Kendaraan tidak ditemukan.');
+    }
+    // Produk ganda di dua baris digabung: baris pengiriman unik per produk.
+    const merged = new Map<string, number>();
+    for (const i of dto.items) merged.set(i.productId, roundMoney((merged.get(i.productId) ?? 0) + i.qty));
     return this.prisma.shipment.create({
       data: {
         tenantId,
@@ -542,9 +647,9 @@ const sheet = await this.assertTimesheet(tenantId, id);
         destination: dto.destination,
         note: dto.note ?? '',
         items: {
-          create: dto.items.map((i) => ({
-            productId: i.productId,
-            qty: new Prisma.Decimal(i.qty),
+          create: [...merged].map(([productId, qty]) => ({
+            productId,
+            qty: new Prisma.Decimal(qty),
           })),
         },
       },
@@ -583,6 +688,7 @@ const sheet = await this.assertTimesheet(tenantId, id);
   async listVehicles(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.vehicle.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: { _count: { select: { shipments: true, maintenanceSchedules: true } } },
       orderBy: { plateNumber: 'asc' },
@@ -629,9 +735,10 @@ const sheet = await this.assertTimesheet(tenantId, id);
         station: dto.station ?? '',
       },
     });
-    if (dto.odometerKm) {
-      await this.prisma.vehicle.update({
-        where: { id: vehicleId },
+    // Odometer hanya boleh maju: catatan isi BBM lama (backfill) tidak boleh memundurkan odometer kendaraan.
+    if (dto.odometerKm && dto.odometerKm > Number(vehicle.odometerKm)) {
+      await this.prisma.vehicle.updateMany({
+        where: { id: vehicleId, odometerKm: { lt: new Prisma.Decimal(dto.odometerKm) } },
         data: { odometerKm: new Prisma.Decimal(dto.odometerKm) },
       });
     }
@@ -643,6 +750,7 @@ const sheet = await this.assertTimesheet(tenantId, id);
   async listWorkOrders(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.workOrder.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: { assignee: { select: { employeeNo: true, fullName: true } } },
       orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
@@ -651,6 +759,18 @@ const sheet = await this.assertTimesheet(tenantId, id);
 
   async createWorkOrder(tenantId: string, dto: CreateWorkOrderDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
+    if (dto.assigneeId) {
+      const emp = await this.prisma.employee.findFirst({ where: { id: dto.assigneeId, tenantId, companyId }, select: { id: true } });
+      if (!emp) throw new NotFoundException('Penanggung jawab tidak ditemukan.');
+    }
+    if (dto.maintenancePlanId) {
+      const plan = await this.prisma.maintenancePlan.findFirst({ where: { id: dto.maintenancePlanId, tenantId, companyId }, select: { id: true } });
+      if (!plan) throw new NotFoundException('Rencana perawatan tidak ditemukan.');
+    }
+    if (dto.vehicleRef) {
+      const vehicle = await this.prisma.vehicle.findFirst({ where: { id: dto.vehicleRef, tenantId, companyId }, select: { id: true } });
+      if (!vehicle) throw new NotFoundException('Kendaraan tidak ditemukan.');
+    }
     return this.prisma.workOrder.create({
       data: {
         tenantId,
@@ -669,18 +789,26 @@ const sheet = await this.assertTimesheet(tenantId, id);
   }
 
   /**
- * Tutup work order dan rugikan biayanya ke GL.
- *
- * Dr Beban Pemeliharaan / Cr Kas. Suku cadang sengaja tidak dicatat
- * sebagai pengeluaran di sini: persediaan hanya boleh berkurang lewat StockOp,
- * jadi kalau work order ikut mengurangi stok, satu suku cadang terpotong
- * dua kali.
- */
+   * Ubah work order; status `closed` merugikan biayanya ke GL.
+   *
+   * Dr Beban Pemeliharaan / Cr Kas. Suku cadang sengaja tidak dicatat
+   * sebagai pengeluaran di sini: persediaan hanya boleh berkurang lewat StockOp,
+   * jadi kalau work order ikut mengurangi stok, satu suku cadang terpotong
+   * dua kali.
+   *
+   * Penutupan diklaim secara atomik (status != closed -> closed) di dalam
+   * transaksi yang sama dengan jurnalnya: dua penutupan bersamaan tidak menerbitkan
+   * jurnal biaya dobel.
+   */
   async updateWorkOrder(tenantId: string, id: string, dto: UpdateWorkOrderDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     const wo = await this.prisma.workOrder.findFirst({ where: { id, tenantId, companyId } });
     if (!wo) throw new NotFoundException('Work order tidak ditemukan.');
     if (wo.status === 'closed') throw new ConflictException('Work order yang sudah ditutup tidak bisa diubah.');
+    if (dto.assigneeId) {
+      const emp = await this.prisma.employee.findFirst({ where: { id: dto.assigneeId, tenantId, companyId }, select: { id: true } });
+      if (!emp) throw new NotFoundException('Penanggung jawab tidak ditemukan.');
+    }
 
     const data: Record<string, unknown> = {};
     if (dto.status !== undefined) data.status = dto.status;
@@ -693,59 +821,73 @@ const sheet = await this.assertTimesheet(tenantId, id);
     if (dto.status === 'completed' || dto.status === 'closed') data.completedAt = new Date();
 
     const closing = dto.status === 'closed';
-    if (closing) {
-      // Jurnal dibuat di dalam transaksi yang sama dengan perubahan status;
-      // kalau jurnal gagal, work order tetap terbuka dan bisa dicoba lagi.
-      return this.prisma.$transaction(async (tx) => {
-        const labor = roundMoney(dto.laborCost ?? Number(wo.laborCost ?? 0));
-        const parts = roundMoney(dto.partsCost ?? Number(wo.partsCost ?? 0));
-        const total = roundMoney(labor + parts);
-
-        if (total > 0) {
-          const [expenseAccount, cashAccount] = await Promise.all([
-            this.accountIn(tx, tenantId, companyId, MAINTENANCE_EXPENSE, 'Beban Pemeliharaan'),
-            this.accountIn(tx, tenantId, companyId, CASH_ACCOUNT, 'Kas'),
-          ]);
-          await this.journals.post(tx, {
-            tenantId,
-            companyId,
-            entryDate: new Date(),
-            sourceModule: 'eam',
-            sourceRefId: wo.id,
-            memo: `Biaya work order ${wo.number}`,
-            lines: [
-              { accountId: expenseAccount.id, direction: 'debit', amount: total, memo: 'Beban pemeliharaan' },
-              { accountId: cashAccount.id, direction: 'credit', amount: total, memo: 'Pembayaran biaya pemeliharaan' },
-            ],
-          });
-        }
-
-        const updated = await tx.workOrder.update({ where: { id }, data });
-        // Jadwal perawatan dimajukan setiap work order selesai, jadi rencana
-        // berikutnya tidak langsung kedaluwarsa begitu siklus pertama lewat.
-        if (updated.status === 'closed') {
-          await tx.maintenancePlan.updateMany({
-            where: { tenantId, companyId, vehicleRefId: wo.vehicleRef ?? undefined, isActive: true },
-            data: { lastDoneAt: new Date() },
-          });
-          await this.advanceSchedules(tx, tenantId, companyId, wo.assetRef);
-        }
-        return updated;
+    if (!closing) {
+      const claimed = await this.prisma.workOrder.updateMany({
+        where: { id, tenantId, companyId, status: { not: 'closed' } },
+        data,
       });
+      if (claimed.count !== 1) throw new ConflictException('Work order sudah ditutup oleh permintaan lain.');
+      return this.prisma.workOrder.findUniqueOrThrow({ where: { id } });
     }
 
-    return this.prisma.workOrder.update({ where: { id }, data });
+    // Jurnal dibuat di dalam transaksi yang sama dengan perubahan status;
+    // kalau jurnal gagal, work order tetap terbuka dan bisa dicoba lagi.
+    return this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.workOrder.updateMany({
+        where: { id, tenantId, companyId, status: { not: 'closed' } },
+        data,
+      });
+      if (claimed.count !== 1) throw new ConflictException('Work order sudah ditutup oleh permintaan lain.');
+
+      const labor = roundMoney(dto.laborCost ?? Number(wo.laborCost ?? 0));
+      const parts = roundMoney(dto.partsCost ?? Number(wo.partsCost ?? 0));
+      const total = roundMoney(labor + parts);
+
+      if (total > 0) {
+        const [expenseAccount, cashAccount] = await Promise.all([
+          this.accountIn(tx, tenantId, companyId, MAINTENANCE_EXPENSE, 'Beban Pemeliharaan'),
+          this.accountIn(tx, tenantId, companyId, CASH_ACCOUNT, 'Kas'),
+        ]);
+        await this.journals.post(tx, {
+          tenantId,
+          companyId,
+          entryDate: new Date(),
+          sourceModule: 'eam',
+          sourceRefId: wo.id,
+          memo: `Biaya work order ${wo.number}`,
+          lines: [
+            { accountId: expenseAccount.id, direction: 'debit', amount: total, memo: 'Beban pemeliharaan' },
+            { accountId: cashAccount.id, direction: 'credit', amount: total, memo: 'Pembayaran biaya pemeliharaan' },
+          ],
+        });
+      }
+
+      // Jadwal perawatan dimajukan setiap work order selesai, jadi rencana
+      // berikutnya tidak langsung kedaluwarsa begitu siklus pertama lewat.
+      await this.advanceSchedules(tx, tenantId, companyId, wo);
+      return tx.workOrder.findUniqueOrThrow({ where: { id } });
+    });
   }
 
-  /** Majukan jadwal preventive maintenance yang terkait aset ini. */
+  /**
+   * Majukan jadwal perawatan yang terkait work order ini: rencana yang ditautkan
+   * langsung, atau yang cocok pada aset/kendaraan yang sama. Filter yang kosong
+   * TIDAK boleh dianggap "semua rencana" (assetRef kosong / vehicleRef null).
+   */
   private async advanceSchedules(
     tx: Prisma.TransactionClient,
     tenantId: string,
     companyId: string,
-    assetRef: string,
+    wo: { maintenancePlanId: string | null; assetRef: string; vehicleRef: string | null },
   ) {
+    const or: Prisma.MaintenancePlanWhereInput[] = [];
+    if (wo.maintenancePlanId) or.push({ id: wo.maintenancePlanId });
+    if (wo.assetRef) or.push({ assetRef: wo.assetRef });
+    if (wo.vehicleRef) or.push({ vehicleRefId: wo.vehicleRef });
+    if (or.length === 0) return 0;
+
     const plans = await tx.maintenancePlan.findMany({
-      where: { tenantId, companyId, assetRef, isActive: true },
+      where: { tenantId, companyId, isActive: true, OR: or },
     });
     const doneAt = new Date();
     for (const plan of plans) {
@@ -781,6 +923,7 @@ const sheet = await this.assertTimesheet(tenantId, id);
   async listMaintenancePlans(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     const plans = await this.prisma.maintenancePlan.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: {
         vehicle: { select: { plateNumber: true, name: true } },

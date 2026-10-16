@@ -4,13 +4,14 @@ import { Icon } from '../icons/Icon';
 import { Reveal } from '../Reveal';
 
 const ROW_1 = [
-  'POS Offline', 'Scan Barcode', 'Multi-pembayaran', 'Struk Digital', 'Jurnal Otomatis',
-  'Low-Stock Alert', 'Prediksi Restock', 'Cashflow Forecast', 'Deteksi Anomali', 'Insight Digest',
+  'Buku Besar', 'Piutang & Utang', 'Rekonsiliasi Bank', 'Aset Tetap', 'PPN Otomatis',
+  'Laba Rugi & Neraca', 'Periode Fiskal', 'Multi-mata Uang', 'Jejak Audit', 'Persetujuan Dokumen',
 ];
 
 const ROW_2 = [
-  'OCR Nota', 'Tanya AI (NLQ)', 'Multi-Outlet', 'Multi-Gudang', 'Mini CRM',
-  'Template Industri', 'Custom Field', 'Role & Permission', 'Push Notification', 'PWA Installable',
+  'POS Offline', 'Scan Barcode', 'Reorder Otomatis', 'Purchase Order', 'BOM & MRP',
+  'Kontrol Mutu', 'Absensi & Cuti', 'Payroll PPh 21', 'Lead & Penawaran', 'Armada & Pengiriman',
+  'Proyek & Gantt', 'Sensor IoT', 'OCR Invoice', 'Tanya AI', 'PWA di HP',
 ];
 
 function ChipRow({ items, reverse, className }: { items: string[]; reverse?: boolean; className?: string }) {
@@ -72,10 +73,10 @@ export function FeatureMarquee() {
   return (
     <section ref={sectionRef} className="bg-chartreuse py-20 lg:py-24 overflow-hidden">
       <Reveal className="mx-auto max-w-3xl px-6 text-center" duration={0.8} y={30}>
-        <h2 className="text-heading-lg font-light text-[#1c1c1c]">Dengan Retalio, semuanya tersambung.</h2>
-        <p className="mt-4 text-[17px] sm:text-[19px] text-[#2d2d2d] leading-relaxed max-w-2xl mx-auto font-normal">
-          POS mencatat penjualan, stok berkurang otomatis, jurnal terbentuk,
-          dan AI mengubah semuanya menjadi keputusan.
+        <h2 className="text-[30px] sm:text-heading-lg font-light text-[#1c1c1c]">Satu transaksi, semua modul ikut bergerak.</h2>
+        <p className="mt-4 text-[16px] sm:text-[19px] text-[#2d2d2d] leading-relaxed max-w-2xl mx-auto font-normal">
+          Penjualan mengurangi stok, stok yang menipis menyusun draf pembelian,
+          dan setiap pergerakan uang berakhir di jurnal yang sama.
         </p>
       </Reveal>
       <div className="mt-12 space-y-3">
@@ -83,8 +84,8 @@ export function FeatureMarquee() {
         <div ref={row2Ref}><ChipRow items={ROW_2} reverse /></div>
       </div>
       <div className="mt-10 text-center">
-        <a href="#fitur" className="group inline-flex items-center gap-2 text-[15px] font-medium text-[#1c1c1c]">
-          <span className="underline decoration-[#4b5b0a] underline-offset-4">Jelajahi semua fitur</span>
+        <a href="#modul" className="group inline-flex items-center gap-2 text-[15px] font-medium text-[#1c1c1c]">
+          <span className="underline decoration-[#4b5b0a] underline-offset-4">Lihat semua modul</span>
           <Icon name="arrow-right" size={15} className="transition-transform duration-150 group-hover:translate-x-0.5" />
         </a>
       </div>

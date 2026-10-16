@@ -28,6 +28,7 @@ export class OutletsService {
         _count: { select: { transactions: true } },
       },
       orderBy: { createdAt: 'asc' },
+      take: 500, // batas pengaman
     });
     // Ratakan _count menjadi field transactionCount yang mudah dipakai UI
     return outlets.map(({ _count, ...outlet }) => ({

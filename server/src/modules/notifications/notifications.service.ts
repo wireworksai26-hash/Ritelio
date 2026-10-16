@@ -17,7 +17,7 @@ export class NotificationsService {
     user: AuthUser,
     query: { unread?: string; page?: number; limit?: number },
   ) {
-    const page = Math.max(Number(query.page) || 1, 1);
+    const page = Math.min(Math.max(Math.trunc(Number(query.page)) || 1, 1), 10_000);
     const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
     const where: Prisma.NotificationWhereInput = {
       ...this.scope(tenantId, user.sub),

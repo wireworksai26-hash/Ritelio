@@ -8,6 +8,7 @@ import { PrismaService } from '../../common/prisma.service';
 import { defaultCompanyId } from '../../common/utils/default-company';
 import { roundMoney } from '../../common/utils/money';
 import { JournalService } from '../accounting/journal.service';
+import { grossAmount, outstandingOf } from '../finance/document-amounts';
 import { TaxDocumentsService } from '../tax/tax-documents.service';
 import { nextDocumentNumber } from '../payables/payables.service';
 import type { CreateReceiptDto, ListDocumentQueryDto } from './dto/receivable.dto';
@@ -46,14 +47,14 @@ export class ReceivablesService {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     const invoices = await this.prisma.customerInvoice.findMany({
       where: { tenantId, companyId, status: { in: ['open', 'partial'] } },
-      select: { dueDate: true, total: true, paidAmount: true },
+      select: { dueDate: true, total: true, taxTotal: true, paidAmount: true },
     });
 
     const today = new Date();
     const buckets = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90plus: 0 };
     let total = 0;
     for (const inv of invoices) {
-      const outstanding = roundMoney(Number(inv.total) - Number(inv.paidAmount));
+      const outstanding = outstandingOf(inv);
       total += outstanding;
       const daysLate = Math.floor((today.getTime() - new Date(inv.dueDate).getTime()) / 86400000);
       if (daysLate <= 0) buckets.current += outstanding;
@@ -119,37 +120,47 @@ export class ReceivablesService {
     return invoice;
   }
 
+  /**
+   * Terima pembayaran faktur. Baris faktur dikunci (FOR UPDATE) di dalam
+   * transaksi agar penerimaan paralel tidak melampaui tagihan, dan nilai yang
+   * dilunasi adalah nilai penuh faktur (DPP + PPN keluaran) karena PPN ikut
+   * masuk ke Piutang Usaha di buku besar.
+   */
   async receive(tenantId: string, invoiceId: string, dto: CreateReceiptDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
-    const invoice = await this.prisma.customerInvoice.findFirst({
-      where: { id: invoiceId, tenantId, companyId },
-    });
-    if (!invoice) throw new NotFoundException('Faktur penjualan tidak ditemukan.');
-    if (invoice.status === 'paid' || invoice.status === 'voided') {
-      throw new BadRequestException(`Faktur ${invoice.number} sudah ${invoice.status}.`);
-    }
-    if (!invoice.customerId) {
-      throw new BadRequestException('Faktur tanpa pelanggan tidak bisa dilunasi.');
-    }
-
-    const outstanding = roundMoney(Number(invoice.total) - Number(invoice.paidAmount));
     if (dto.amount <= 0) throw new BadRequestException('Nominal penerimaan harus positif.');
-    if (dto.amount > outstanding) {
-      throw new BadRequestException(
-        `Penerimaan melebihi sisa tagihan. Sisa: ${outstanding.toLocaleString('id-ID')}.`,
-      );
-    }
 
     const [piutang, kas] = await Promise.all([
-      this.findAccount(tenantId, companyId, ['1300', '1200'], 'asset', 'Piutang Usaha'),
+      this.findAccount(tenantId, companyId, ['1200'], 'asset', 'Piutang Usaha'),
       this.findAccount(tenantId, companyId, ['1000'], 'asset', 'Kas'),
     ]);
 
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM customer_invoices WHERE id = ${invoiceId} AND tenant_id = ${tenantId} AND company_id = ${companyId} FOR UPDATE`;
+      const invoice = await tx.customerInvoice.findFirst({
+        where: { id: invoiceId, tenantId, companyId },
+      });
+      if (!invoice) throw new NotFoundException('Faktur penjualan tidak ditemukan.');
+      if (invoice.status === 'paid' || invoice.status === 'voided') {
+        throw new BadRequestException(`Faktur ${invoice.number} sudah ${invoice.status}.`);
+      }
+      if (!invoice.customerId) {
+        throw new BadRequestException('Faktur tanpa pelanggan tidak bisa dilunasi.');
+      }
+
+      const gross = grossAmount(invoice);
+      const outstanding = roundMoney(gross - Number(invoice.paidAmount));
+      if (dto.amount > outstanding) {
+        throw new BadRequestException(
+          `Penerimaan melebihi sisa tagihan. Sisa: ${outstanding.toLocaleString('id-ID')}.`,
+        );
+      }
+
+      const payDate = dto.payDate ? new Date(dto.payDate) : new Date();
       const journal = await this.journals.post(tx, {
         tenantId,
         companyId,
-        entryDate: dto.payDate ? new Date(dto.payDate) : new Date(),
+        entryDate: payDate,
         sourceModule: 'receivables',
         sourceRefId: invoiceId,
         memo: `Penerimaan faktur ${invoice.number}`,
@@ -168,7 +179,7 @@ export class ReceivablesService {
           customerId: invoice.customerId,
           invoiceId,
           journalId: journal.id,
-          payDate: dto.payDate ? new Date(dto.payDate) : new Date(),
+          payDate,
           amount: new Prisma.Decimal(dto.amount),
           method: dto.method ?? 'cash',
           note: dto.note ?? '',
@@ -176,8 +187,8 @@ export class ReceivablesService {
       });
 
       const paidAmount = roundMoney(Number(invoice.paidAmount) + dto.amount);
-      // Dibandingkan dengan total, bukan sisa: `paidAmount` sudah kumulatif.
-      const status = paidAmount >= roundMoney(Number(invoice.total)) ? 'paid' : 'partial';
+      // Dibandingkan dengan nilai penuh, bukan sisa: `paidAmount` sudah kumulatif.
+      const status = paidAmount >= gross ? 'paid' : 'partial';
       await tx.customerInvoice.update({
         where: { id: invoiceId },
         data: { paidAmount: new Prisma.Decimal(paidAmount), status },
@@ -191,7 +202,7 @@ export class ReceivablesService {
     tenantId: string,
     companyId: string,
     codes: string[],
-    type: 'asset',
+    _type: 'asset',
     label: string,
   ) {
     for (const code of codes) {
@@ -200,14 +211,11 @@ export class ReceivablesService {
       });
       if (account) return account;
     }
-    const fallback = await this.prisma.chartOfAccount.findFirst({
-      where: { tenantId, companyId, type, code: { startsWith: '1' } },
-    });
-    if (fallback) return fallback;
+    // Tanpa fallback berdasarkan tipe: akun aset pertama bisa saja Persediaan/Aset Tetap.
     throw new NotFoundException(`Akun ${label} belum ada pada COA perusahaan.`);
   }
 
-  private withOutstanding<T extends { total: unknown; paidAmount: unknown }>(inv: T) {
-    return { ...inv, outstanding: roundMoney(Number(inv.total) - Number(inv.paidAmount)) };
+  private withOutstanding<T extends { total: unknown; taxTotal?: unknown; paidAmount: unknown }>(inv: T) {
+    return { ...inv, grossTotal: grossAmount(inv), outstanding: outstandingOf(inv) };
   }
 }

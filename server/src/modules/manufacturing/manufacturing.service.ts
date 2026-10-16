@@ -10,6 +10,7 @@ import { defaultCompanyId } from '../../common/utils/default-company';
 import { roundMoney } from '../../common/utils/money';
 import { JournalService } from '../accounting/journal.service';
 import { computeMovingAverage } from '../inventory/moving-average';
+import { advisoryLock, isUniqueViolation, retryOnConflict } from '../inventory/tx-retry';
 import type {
   BomLineInputDto,
   CreateBomDto,
@@ -45,6 +46,7 @@ export class ManufacturingService {
   listBoms(tenantId: string) {
     return this.company(tenantId).then((companyId) =>
       this.prisma.billOfMaterials.findMany({
+      take: 500,
         where: { tenantId, companyId },
         include: {
           product: { select: { id: true, sku: true, name: true, unit: true, productType: true } },
@@ -71,48 +73,57 @@ export class ManufacturingService {
     if (componentIds.includes(dto.productId)) {
       throw new BadRequestException('Produk jadi tidak boleh menjadi komponen dirinya sendiri.');
     }
+    if (new Set(componentIds).size !== componentIds.length) {
+      throw new BadRequestException('Satu komponen hanya boleh muncul sekali per BOM; gabungkan jumlahnya.');
+    }
     const components = await this.prisma.product.count({
       where: { tenantId, id: { in: componentIds } },
     });
-    if (components !== new Set(componentIds).size) {
+    if (components !== componentIds.length) {
       throw new NotFoundException('Ada komponen yang tidak ditemukan pada katalog.');
     }
 
-    const version =
-      (await this.prisma.billOfMaterials.findFirst({
-        where: { tenantId, companyId, productId: dto.productId },
-        orderBy: { version: 'desc' },
-        select: { version: true },
-      }))?.version ?? 0;
+    try {
+      // BOM dibuat dan diperiksa siklusnya dalam satu transaksi: BOM bersiklus
+      // dibatalkan oleh rollback, bukan dihapus belakangan (yang bisa gagal diam-diam).
+      return await this.prisma.$transaction(async (tx) => {
+        await advisoryLock(tx, `bom:${tenantId}:${companyId}:${dto.productId}`);
+        const version =
+          (await tx.billOfMaterials.findFirst({
+            where: { tenantId, companyId, productId: dto.productId },
+            orderBy: { version: 'desc' },
+            select: { version: true },
+          }))?.version ?? 0;
 
-    const bom = await this.prisma.billOfMaterials.create({
-      data: {
-        tenantId,
-        companyId,
-        productId: dto.productId,
-        name: dto.name,
-        outputQty: new Prisma.Decimal(dto.outputQty ?? 1),
-        version: version + 1,
-        lines: {
-          create: dto.lines.map((l) => ({
-            productId: l.productId,
-            qtyRequired: new Prisma.Decimal(l.qtyRequired),
-            scrapPercent: new Prisma.Decimal(l.scrapPercent ?? 0),
-          })),
-        },
-      },
-      include: { lines: true },
-    });
+        const bom = await tx.billOfMaterials.create({
+          data: {
+            tenantId,
+            companyId,
+            productId: dto.productId,
+            name: dto.name,
+            outputQty: new Prisma.Decimal(dto.outputQty ?? 1),
+            version: version + 1,
+            lines: {
+              create: dto.lines.map((l) => ({
+                productId: l.productId,
+                qtyRequired: new Prisma.Decimal(l.qtyRequired),
+                scrapPercent: new Prisma.Decimal(l.scrapPercent ?? 0),
+              })),
+            },
+          },
+          include: { lines: true },
+        });
 
-    const cycles = await this.findCycles(tenantId, companyId, bom.id);
-    if (cycles.length > 0) {
-      // Buang BOM yang baru dibuat supaya tidak menyisakan data tidak valid.
-      await this.prisma.billOfMaterials.delete({ where: { id: bom.id } }).catch(() => undefined);
-      throw new BadRequestException(
-        `BOM ini menimbulkan siklus: ${cycles.join(' -> ')}.`,
-      );
+        const cycles = await this.findCycles(tx, tenantId, companyId, bom.id);
+        if (cycles.length > 0) {
+          throw new BadRequestException(`BOM ini menimbulkan siklus: ${cycles.join(' -> ')}.`);
+        }
+        return bom;
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ConflictException('Versi BOM bentrok, coba lagi.');
+      throw error;
     }
-    return bom;
   }
 
   async setBomActive(tenantId: string, id: string, isActive: boolean) {
@@ -242,6 +253,7 @@ export class ManufacturingService {
   async listProductionOrders(tenantId: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.productionOrder.findMany({
+      take: 500,
       where: { tenantId, companyId },
       include: {
         product: { select: { sku: true, name: true, unit: true } },
@@ -271,6 +283,11 @@ export class ManufacturingService {
           where: { tenantId, companyId, productId: dto.productId, isActive: true },
           orderBy: { version: 'desc' },
         });
+    if (dto.bomId && !bom) throw new NotFoundException('BOM tidak ditemukan.');
+    // BOM milik produk lain akan menarik bahan yang salah dan mengisi stok produk yang salah.
+    if (bom && bom.productId !== dto.productId) {
+      throw new BadRequestException('BOM tersebut bukan milik produk yang diproduksi.');
+    }
 
     return this.prisma.productionOrder.create({
       data: {
@@ -296,6 +313,10 @@ export class ManufacturingService {
    * Urutan ini wajib. Order barang jadi memakai barang setengah jadi sebagai
    * bahan; kalau induk dilepas lebih dulu, stok semi-finished masih nol dan
    * order gagal padahal bahan mentahnya tersedia.
+   *
+   * Idempoten terhadap kegagalan di tengah jalan: bila rilis induk gagal (mis.
+   * bahan mentah kurang) sub-order yang sudah dibuat/diselesaikan DIPAKAI ULANG
+   * pada percobaan berikutnya, bukan digandakan.
    */
   async releaseMultiLevel(tenantId: string, id: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
@@ -304,18 +325,25 @@ export class ManufacturingService {
       throw new ConflictException(`Order ${order.number} sudah berstatus ${order.status}.`);
     }
 
-    // Post-order: subtree terdalam muncul lebih dulu sehingga urutannya sudah
-    // siap tanpa perlu topological sort terpisah.
-    const subOrderIds = await this.prisma.$transaction((tx) =>
-      this.explodeSubOrders(tx, tenantId, companyId, order, 1),
-    );
+    let subOrderIds = await this.collectSubOrders(id);
+    if (subOrderIds.length === 0) {
+      subOrderIds = await this.prisma.$transaction(async (tx) => {
+        // Kunci per order induk: dua rilis bersamaan tidak membuat sub-order ganda.
+        await advisoryLock(tx, `mo-explode:${id}`);
+        const existing = await tx.productionOrder.count({ where: { parentOrderId: id } });
+        if (existing > 0) return [];
+        return this.explodeSubOrders(tx, tenantId, companyId, order, 1);
+      });
+      if (subOrderIds.length === 0) subOrderIds = await this.collectSubOrders(id);
+    }
 
     // Release hanya menarik bahan; barang setengah jadi baru ada setelah order
     // sub diselesaikan. Kalau tidak diselesaikan di sini, order induk tetap
     // gagal karena stok semi-finished masih nol.
     for (const subId of subOrderIds) {
-      await this.release(tenantId, subId);
       const sub = await this.prisma.productionOrder.findUniqueOrThrow({ where: { id: subId } });
+      if (sub.status === 'completed') continue;
+      if (sub.status === 'planned') await this.release(tenantId, subId);
       await this.complete(tenantId, subId, Number(sub.qtyPlanned));
     }
     await this.release(tenantId, id);
@@ -327,6 +355,22 @@ export class ManufacturingService {
       }),
       subOrderIds,
     };
+  }
+
+  /** Sub-order yang sudah ada untuk satu induk, urutan post-order (terdalam dulu). */
+  private async collectSubOrders(parentId: string, depth = 0): Promise<string[]> {
+    if (depth > 10) return [];
+    const children = await this.prisma.productionOrder.findMany({
+      where: { parentOrderId: parentId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    const out: string[] = [];
+    for (const child of children) {
+      out.push(...(await this.collectSubOrders(child.id, depth + 1)));
+      out.push(child.id);
+    }
+    return out;
   }
 
   /**
@@ -357,17 +401,20 @@ export class ManufacturingService {
     for (const line of bom.lines) {
       const subBom = await tx.billOfMaterials.findFirst({
         where: { tenantId, companyId, productId: line.productId, isActive: true },
+        orderBy: { version: 'desc' },
         select: { id: true, outputQty: true },
       });
       if (!subBom) continue; // bahan mentah, cukup ditarik saat release
 
       const scrap = Number(line.scrapPercent ?? 0) / 100;
-      const qtyPlanned = Number(line.qtyRequired) * multiplier * (1 + scrap);
+      // Pembulatan sama persis dengan kebutuhan di release() induk (2 desimal):
+      // selisih pembulatan akan membuat stok semi-finished kurang sedikit.
+      const qtyPlanned = roundMoney(Number(line.qtyRequired) * multiplier * (1 + scrap));
       const sub = await tx.productionOrder.create({
         data: {
           tenantId,
           companyId,
-          number: await this.nextNumber(tenantId, companyId, 'production-order', 'MO'),
+          number: await this.nextNumberIn(tx, tenantId, companyId, 'production-order', 'MO'),
           productId: line.productId,
           bomId: subBom.id,
           warehouseId: parent.warehouseId,
@@ -387,6 +434,10 @@ export class ManufacturingService {
   /**
    * Mulai produksi: komponen ditarik dari gudang dan dicatat pada kartu stok.
    * Komponen yang tidak cukup menolak seluruh order (tidak ada partial).
+   *
+   * Cek stok dan pengurangan ada di DALAM transaksi, dengan pengurangan
+   * bersyarat (quantity >= kebutuhan): dua rilis berbeda yang berebut bahan yang
+   * sama tidak bisa membuat stok negatif.
    */
   async release(tenantId: string, id: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
@@ -407,33 +458,7 @@ export class ManufacturingService {
     const outputQty = Number(bom.outputQty) || 1;
     const multiplier = Number(order.qtyPlanned) / outputQty;
 
-    // Periksa seluruh bahan dulu sebelum ada yang dikurangi, supaya order
-    // tidak gagal setengah jalan dengan sebagian bahan sudah keluar.
-    const plan: Array<{ line: (typeof bom.lines)[number]; needed: number; onHand: number }> = [];
-    for (const line of bom.lines) {
-      const scrapFactor = 1 + Number(line.scrapPercent) / 100;
-      const needed = roundMoney(Number(line.qtyRequired) * multiplier * scrapFactor);
-      const stock = await this.prisma.inventoryStock.findUnique({
-        where: {
-          tenantId_companyId_productId_warehouseId: {
-            tenantId,
-            companyId,
-            productId: line.productId,
-            warehouseId: order.warehouseId,
-          },
-        },
-        select: { quantity: true, avgCost: true, product: { select: { name: true } } },
-      });
-      const onHand = Number(stock?.quantity ?? 0);
-      if (onHand < needed) {
-        throw new BadRequestException(
-          `Bahan "${stock?.product.name ?? line.productId}" tidak cukup (tersedia ${onHand}, dibutuhkan ${needed}).`,
-        );
-      }
-      plan.push({ line, needed, onHand });
-    }
-
-    return this.prisma.$transaction(
+    return retryOnConflict(() => this.prisma.$transaction(
       async (tx) => {
         const claimed = await tx.productionOrder.updateMany({
           where: { id, tenantId, companyId, status: 'planned' },
@@ -442,42 +467,54 @@ export class ManufacturingService {
         if (claimed.count !== 1) throw new ConflictException('Order sudah dimulai.');
 
         let materialCost = 0;
-        for (const item of plan) {
-          const stock = await tx.inventoryStock.findUnique({
-            where: {
-              tenantId_companyId_productId_warehouseId: {
-                tenantId,
-                companyId,
-                productId: item.line.productId,
-                warehouseId: order.warehouseId,
-              },
+        let components = 0;
+        for (const line of bom.lines) {
+          const scrapFactor = 1 + Number(line.scrapPercent) / 100;
+          const needed = roundMoney(Number(line.qtyRequired) * multiplier * scrapFactor);
+          const key = {
+            tenantId_companyId_productId_warehouseId: {
+              tenantId,
+              companyId,
+              productId: line.productId,
+              warehouseId: order.warehouseId,
             },
-            select: { avgCost: true },
+          };
+          const stock = await tx.inventoryStock.findUnique({
+            where: key,
+            select: { quantity: true, avgCost: true, product: { select: { name: true } } },
           });
+          const onHand = Number(stock?.quantity ?? 0);
+          const taken = await tx.inventoryStock.updateMany({
+            where: {
+              tenantId,
+              companyId,
+              productId: line.productId,
+              warehouseId: order.warehouseId,
+              quantity: { gte: new Prisma.Decimal(needed) },
+            },
+            data: { quantity: { decrement: new Prisma.Decimal(needed) } },
+          });
+          if (taken.count !== 1) {
+            const prod = stock?.product.name
+              ?? (await tx.product.findUnique({ where: { id: line.productId }, select: { name: true } }))?.name
+              ?? line.productId;
+            throw new BadRequestException(
+              `Bahan "${prod}" tidak cukup (tersedia ${onHand}, dibutuhkan ${needed}).`,
+            );
+          }
           const unitCost = Number(stock?.avgCost ?? 0);
-          const totalCost = roundMoney(unitCost * item.needed);
+          const totalCost = roundMoney(unitCost * needed);
           materialCost += totalCost;
 
-          await tx.inventoryStock.update({
-            where: {
-              tenantId_companyId_productId_warehouseId: {
-                tenantId,
-                companyId,
-                productId: item.line.productId,
-                warehouseId: order.warehouseId,
-              },
-            },
-            data: { quantity: { decrement: item.needed } },
-          });
           await tx.stockMovement.create({
             data: {
               tenantId,
               companyId,
-              productId: item.line.productId,
+              productId: line.productId,
               warehouseId: order.warehouseId,
               type: 'production',
-              quantity: new Prisma.Decimal(item.needed).negated(),
-              note: `Kmaterial ${order.number}`,
+              quantity: new Prisma.Decimal(needed).negated(),
+              note: `Material ${order.number}`,
               refId: order.id,
             },
           });
@@ -486,12 +523,13 @@ export class ManufacturingService {
               tenantId,
               companyId,
               productionOrderId: order.id,
-              productId: item.line.productId,
-              qty: new Prisma.Decimal(item.needed),
+              productId: line.productId,
+              qty: new Prisma.Decimal(needed),
               unitCost: new Prisma.Decimal(unitCost),
               totalCost: new Prisma.Decimal(totalCost),
             },
           });
+          components += 1;
         }
 
         const total = roundMoney(materialCost);
@@ -499,16 +537,19 @@ export class ManufacturingService {
           where: { id },
           data: { status: 'released', materialCost: new Prisma.Decimal(total) },
         });
-        return { released: true, number: order.number, materialCost: total, components: plan.length };
+        return { released: true, number: order.number, materialCost: total, components };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+    ));
   }
 
   /**
    * Selesai produksi: barang jadi masuk gudang dan jurnal
    *   Dr Persediaan (barang jadi) / Cr Persediaan (bahan mentah)
    * memakai HPP moving average bahan yang benar-benar terpakai.
+   *
+   * Gerbang kualitas: tahap QC wajib yang dikonfigurasi untuk produk harus sudah
+   * LULUS semua (bukan cuma "tidak ada yang gagal") sebelum barang jadi masuk stok.
    */
   async complete(tenantId: string, id: string, qtyProduced?: number) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
@@ -524,14 +565,30 @@ export class ManufacturingService {
     const produced = roundMoney(qtyProduced ?? Number(order.qtyPlanned));
     if (produced <= 0) throw new BadRequestException('Jumlah produksi harus lebih dari 0.');
 
-    // QC gagal berarti produksi tidak boleh dianggap selesai.
-    const failedCheck = await this.prisma.qualityCheck.findFirst({
-      where: { productionOrderId: id, result: 'failed' },
-      select: { stage: true },
-    });
+    // QC gagal berarti produksi tidak boleh dianggap selesai; tahap wajib yang
+    // belum diperiksa juga menahan penyelesaian.
+    const [checks, requiredStages] = await Promise.all([
+      this.prisma.qualityCheck.findMany({
+        where: { productionOrderId: id },
+        select: { stage: true, result: true },
+      }),
+      this.prisma.qcStageConfig.findMany({
+        where: { tenantId, companyId, productId: order.productId, isRequired: true },
+        orderBy: { sortOrder: 'asc' },
+        select: { stage: true },
+      }),
+    ]);
+    const failedCheck = checks.find((c) => c.result === 'failed');
     if (failedCheck) {
       throw new BadRequestException(
         `QC tahap "${failedCheck.stage}" gagal, produksi tidak bisa diselesaikan.`,
+      );
+    }
+    const passed = new Set(checks.filter((c) => c.result === 'passed').map((c) => c.stage));
+    const missing = requiredStages.filter((s) => !passed.has(s.stage));
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `QC wajib belum lulus untuk tahap: ${missing.map((s) => s.stage).join(', ')}. Selesaikan QC bertingkat dulu.`,
       );
     }
 
@@ -546,7 +603,7 @@ export class ManufacturingService {
       throw new NotFoundException('Akun 1100 (Persediaan) belum ada pada COA perusahaan.');
     }
 
-    return this.prisma.$transaction(
+    return retryOnConflict(() => this.prisma.$transaction(
       async (tx) => {
         const claimed = await tx.productionOrder.updateMany({
           where: { id, tenantId, companyId, status: { in: ['released', 'in_progress'] } },
@@ -628,12 +685,35 @@ export class ManufacturingService {
         return { completed: true, number: order.number, qtyProduced: produced, unitCost };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+    ));
   }
-
+  /**
+   * Jalur QC lama (hasil bebas). Hanya untuk produk TANPA konfigurasi tahap:
+   * produk bertahap wajib lewat POST orders/:id/qc yang menjaga urutan. Tanpa
+   * pembatasan ini, tahap "final" bisa ditandai lulus langsung dan melompati
+   * tahap sebelumnya.
+   */
   async recordQualityCheck(tenantId: string, id: string, dto: QualityCheckDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     const order = await this.assertOrder(tenantId, id);
+    if (order.status === 'completed' || order.status === 'cancelled') {
+      throw new ConflictException(`Order ${order.status} tidak bisa di-QC lagi.`);
+    }
+    const stages: readonly string[] = ['incoming', 'in_process', 'final'];
+    if (!stages.includes(dto.stage)) {
+      throw new BadRequestException(`Tahap QC harus salah satu dari: ${stages.join(', ')}.`);
+    }
+    const configured = await this.prisma.qcStageConfig.count({
+      where: { tenantId, companyId, productId: order.productId, isRequired: true },
+    });
+    if (configured > 0) {
+      throw new BadRequestException(
+        'Produk ini memakai QC bertingkat. Catat hasilnya lewat POST /manufacturing/orders/:id/qc agar urutan tahap terjaga.',
+      );
+    }
+    if (dto.defectQty !== undefined && dto.checkedQty !== undefined && dto.defectQty > dto.checkedQty) {
+      throw new BadRequestException('Jumlah cacat tidak boleh melebihi jumlah yang diperiksa.');
+    }
     return this.prisma.qualityCheck.upsert({
       where: { productionOrderId_stage: { productionOrderId: order.id, stage: dto.stage as never } },
       update: {
@@ -656,19 +736,44 @@ export class ManufacturingService {
     });
   }
 
+  /**
+   * Batalkan order. Hanya order `planned`: begitu dirilis, bahan sudah keluar dari
+   * gudang dan tidak ada jurnal/stok pembalik, jadi membatalkannya diam-diam akan
+   * membuat bahan "hilang". Klaim bersyarat supaya cancel yang berpapasan dengan
+   * release tidak menimpa status.
+   */
   async cancel(tenantId: string, id: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     const order = await this.assertOrder(tenantId, id);
     if (order.status === 'completed') {
       throw new ConflictException('Produksi yang sudah selesai tidak bisa dibatalkan.');
     }
-    return this.prisma.productionOrder.update({ where: { id }, data: { status: 'cancelled' } });
+    if (order.status !== 'planned') {
+      throw new ConflictException(
+        order.status === 'cancelled'
+          ? 'Order sudah dibatalkan.'
+          : `Order berstatus ${order.status}: bahan sudah ditarik dari gudang sehingga tidak bisa dibatalkan.`,
+      );
+    }
+    const claimed = await this.prisma.productionOrder.updateMany({
+      where: { id, tenantId, companyId, status: 'planned' },
+      data: { status: 'cancelled' },
+    });
+    if (claimed.count !== 1) {
+      throw new ConflictException('Status order baru saja berubah dan tidak bisa dibatalkan.');
+    }
+    return this.prisma.productionOrder.findUniqueOrThrow({ where: { id } });
   }
 
   // ============================== HELPERS ==============================
 
-  /** Deteksi siklus BOM lewat DFS. */
-  private async findCycles(tenantId: string, companyId: string, startBomId: string): Promise<string[]> {
+  /** Deteksi siklus BOM lewat DFS (bisa dipakai di dalam transaksi). */
+  private async findCycles(
+    db: Prisma.TransactionClient | PrismaService,
+    tenantId: string,
+    companyId: string,
+    startBomId: string,
+  ): Promise<string[]> {
     const path: string[] = [];
     const inPath = new Set<string>();
     let cycle: string[] | null = null;
@@ -681,8 +786,9 @@ export class ManufacturingService {
       }
       inPath.add(pid);
       path.push(pid);
-      const bom = await this.prisma.billOfMaterials.findFirst({
+      const bom = await db.billOfMaterials.findFirst({
         where: { tenantId, companyId, productId: pid, isActive: true },
+        orderBy: { version: 'desc' },
         include: { lines: { select: { productId: true } } },
       });
       for (const line of bom?.lines ?? []) await visit(line.productId);
@@ -690,7 +796,7 @@ export class ManufacturingService {
       inPath.delete(pid);
     };
 
-    const start = await this.prisma.billOfMaterials.findUnique({
+    const start = await db.billOfMaterials.findUnique({
       where: { id: startBomId },
       select: { productId: true },
     });
@@ -709,16 +815,26 @@ export class ManufacturingService {
     return defaultCompanyId(this.prisma, tenantId);
   }
 
-  private async nextNumber(tenantId: string, companyId: string, kind: string, prefix: string) {
+  private nextNumber(tenantId: string, companyId: string, kind: string, prefix: string) {
+    return this.nextNumberIn(this.prisma, tenantId, companyId, kind, prefix);
+  }
+
+  private async nextNumberIn(
+    db: Prisma.TransactionClient | PrismaService,
+    tenantId: string,
+    companyId: string,
+    kind: string,
+    prefix: string,
+  ) {
     const year = new Date().getFullYear();
     for (let attempt = 0; attempt < 5; attempt++) {
-      const counter = await this.prisma.documentSequence.upsert({
+      const counter = await db.documentSequence.upsert({
         where: { tenantId_companyId_kind: { tenantId, companyId, kind } },
         update: { nextValue: { increment: 1 } },
         create: { tenantId, companyId, kind, nextValue: 2 },
       });
       const candidate = `${prefix}-${year}-${String(counter.nextValue - 1).padStart(5, '0')}`;
-      const exists = await this.prisma.productionOrder.findFirst({
+      const exists = await db.productionOrder.findFirst({
         where: { tenantId, companyId, number: candidate },
         select: { id: true },
       });

@@ -1,7 +1,8 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 import { defaultCompanyId } from '../../common/utils/default-company';
+import { advisoryLock, isUniqueViolation } from '../inventory/tx-retry';
 import { detectAnomaly, generateApiKey, hashApiKey, summarizeValues, validateReading, verifyApiKey } from './sensor-logic';
 
 export interface SensorReadingInput {
@@ -33,9 +34,20 @@ export class IotService {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     const existing = await this.prisma.sensorDevice.findFirst({ where: { tenantId, code: dto.code } });
     if (existing) throw new BadRequestException(`Kode sensor "${dto.code}" sudah dipakai.`);
+    // Gudang/work center harus milik tenant ini; id asing tidak boleh tertaut.
+    if (dto.warehouseId) {
+      const wh = await this.prisma.warehouse.findFirst({ where: { id: dto.warehouseId, tenantId, companyId }, select: { id: true } });
+      if (!wh) throw new NotFoundException('Gudang tidak ditemukan.');
+    }
+    if (dto.workCenterId) {
+      const wc = await this.prisma.workCenter.findFirst({ where: { id: dto.workCenterId, tenantId, companyId }, select: { id: true } });
+      if (!wc) throw new NotFoundException('Work center tidak ditemukan.');
+    }
 
     const apiKey = generateApiKey();
-    const created = await this.prisma.sensorDevice.create({
+    let created;
+    try {
+    created = await this.prisma.sensorDevice.create({
       data: {
         tenantId,
         companyId,
@@ -49,6 +61,10 @@ export class IotService {
       },
       select: { id: true, code: true, name: true, type: true },
     });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ConflictException(`Kode sensor "${dto.code}" sudah dipakai.`);
+      throw error;
+    }
     // Hanya hash yang tersimpan; key asli ditampilkan sekali ini saja.
     return { ...created, apiKey };
   }
@@ -66,21 +82,39 @@ export class IotService {
     });
   }
 
-  /** Ingesti pembacaan. Endpoint ini tidak butuh JWT — auth-nya API key sensor. */
-  async ingest(tenantId: string, input: SensorReadingInput) {
-    const device = await this.prisma.sensorDevice.findFirst({
-      where: { tenantId, code: input.deviceCode },
+  /**
+   * Ingesti pembacaan. Endpoint ini tidak butuh JWT — auth-nya API key sensor — jadi
+   * tenant TIDAK tersedia dari token (`tenantId` undefined pada rute @Public). Perangkat
+   * dikenali dari (kode + API key): kode boleh sama di tenant berbeda dan key yang
+   * menentukan perangkat mana. Tanpa ini query tak terfilter tenant dan penyimpanan
+   * pembacaan gagal 500 karena tenantId kosong.
+   */
+  async ingest(tenantId: string | undefined, input: SensorReadingInput) {
+    const candidates = await this.prisma.sensorDevice.findMany({
+      where: { code: input.deviceCode, ...(tenantId ? { tenantId } : {}) },
     });
     // Sensor tak dikenal dan key salah memberi jawaban yang sama: endpoint publik
     // tidak boleh membocorkan kode sensor mana yang ada.
-    const auth = device ? verifyApiKey(device.apiKey, input.apiKey) : { ok: false, legacy: false };
+    let device = candidates[0];
+    let auth = { ok: false, legacy: false };
+    for (const candidate of candidates) {
+      const check = verifyApiKey(candidate.apiKey, input.apiKey);
+      if (check.ok) {
+        device = candidate;
+        auth = check;
+        break;
+      }
+    }
     if (!device || !auth.ok) throw new ForbiddenException('Sensor atau API key tidak valid.');
+    tenantId = device.tenantId;
     if (!device.isActive) throw new ForbiddenException('Sensor dinonaktifkan.');
 
     const at = validateReading(device.type, input.value, new Date(), input.recordedAt);
 
     const outcome = await this.prisma.$transaction(async (tx) => {
       // Pengiriman ulang (retry sensor) untuk waktu yang sama tidak boleh menggandakan baris.
+      // Kunci per (perangkat, waktu): tanpa ini dua retry bersamaan sama-sama lolos cek lalu sama-sama menyimpan.
+      await advisoryLock(tx, `iot-reading:${device.id}:${at.getTime()}`);
       const existing = await tx.sensorReading.findFirst({
         where: { tenantId, deviceId: device.id, recordedAt: at },
         select: { value: true, recordedAt: true },

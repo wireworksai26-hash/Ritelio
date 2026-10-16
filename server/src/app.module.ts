@@ -9,6 +9,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { CompanyContextInterceptor } from './common/interceptors/company-context.interceptor';
+import { HealthController } from './common/health/health.controller';
 import { PrismaModule } from './common/prisma.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -40,6 +41,7 @@ import { OperationsModule } from './modules/operations/operations.module';
 
 // Modular monolith (TRD): tiap domain = modul; guards & audit global.
 @Module({
+  controllers: [HealthController],
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateConfig }),
     ThrottlerModule.forRoot([

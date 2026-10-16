@@ -306,6 +306,7 @@ export class InventoryService {
 
   listCategories(tenantId: string) {
     return this.prisma.productCategory.findMany({
+      take: 500,
       where: { tenantId },
       orderBy: { name: 'asc' },
     });
@@ -384,6 +385,7 @@ export class InventoryService {
   async listWarehouses(tenantId: string, isActive?: boolean) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.warehouse.findMany({
+      take: 500,
       where: {
         tenantId,
         companyId,
@@ -450,6 +452,7 @@ export class InventoryService {
   async listStock(tenantId: string, query: StockQueryDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     const rows = await this.prisma.inventoryStock.findMany({
+      take: 1000,
       where: { tenantId, companyId, ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}) },
       include: {
         product: { select: { id: true, name: true, sku: true, unit: true, sellPrice: true } },
@@ -464,6 +467,7 @@ export class InventoryService {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     // Ambang minimum disimpan per baris stok, jadi filter dilakukan di JS
     const rows = await this.prisma.inventoryStock.findMany({
+      take: 1000,
       where: { tenantId, companyId },
       include: { product: true, warehouse: true },
     });

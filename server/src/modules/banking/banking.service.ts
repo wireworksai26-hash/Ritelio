@@ -56,6 +56,16 @@ export class BankingService {
         `Akun kas di COA tidak ditemukan. Buat akun ${CASH_CODE} terlebih dahulu.`,
       );
     }
+    // Rekening bank adalah kas/bank: hanya akun aset detail yang boleh ditautkan.
+    // Menautkan ke akun pendapatan/beban membuat rekonsiliasi dan arus kas salah arah.
+    if (ledgerAccount.type !== 'asset') {
+      throw new BadRequestException(
+        `Akun ${ledgerAccount.code} bertipe ${ledgerAccount.type}; rekening bank harus ditautkan ke akun aset (kas/bank).`,
+      );
+    }
+    if ((await this.prisma.chartOfAccount.count({ where: { parentId: ledgerAccount.id } })) > 0) {
+      throw new BadRequestException(`Akun ${ledgerAccount.code} adalah akun induk; pilih akun kas/bank detail.`);
+    }
 
     try {
       return await this.prisma.bankAccount.create({

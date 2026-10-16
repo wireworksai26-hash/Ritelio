@@ -2,7 +2,7 @@ import { Type } from 'class-transformer';
 import { ToBoolean } from '../../../common/dto/to-boolean.transform';
 import {
   IsBoolean,
-  IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -33,7 +33,7 @@ export class ProductQueryDto {
   categoryId?: string;
 
   @IsOptional()
-  @IsEnum(PRODUCT_TYPES)
+  @IsIn(PRODUCT_TYPES)
   productType?: (typeof PRODUCT_TYPES)[number];
 
   @IsOptional()
@@ -72,7 +72,7 @@ export class CreateProductDto {
   categoryId?: string;
 
   @IsOptional()
-  @IsEnum(PRODUCT_TYPES)
+  @IsIn(PRODUCT_TYPES)
   productType?: (typeof PRODUCT_TYPES)[number];
 
   @IsOptional()
@@ -145,7 +145,7 @@ export class UpdateProductDto {
   categoryId?: string;
 
   @IsOptional()
-  @IsEnum(PRODUCT_TYPES)
+  @IsIn(PRODUCT_TYPES)
   productType?: (typeof PRODUCT_TYPES)[number];
 
   @IsOptional()

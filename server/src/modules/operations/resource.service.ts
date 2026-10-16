@@ -24,7 +24,13 @@ export class ResourceService {
 
   async listAllocations(tenantId: string, projectId?: string) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
+    if (projectId) {
+      // Proyek harus milik tenant ini: id asing dijawab 404, bukan 200 berisi daftar kosong.
+      const project = await this.prisma.project.findFirst({ where: { id: projectId, tenantId, companyId }, select: { id: true } });
+      if (!project) throw new NotFoundException('Proyek tidak ditemukan.');
+    }
     return this.prisma.resourceAllocation.findMany({
+      take: 500,
       where: { tenantId, companyId, ...(projectId ? { projectId } : {}) },
       include: {
         employee: { select: { employeeNo: true, fullName: true, position: { select: { name: true } } } },

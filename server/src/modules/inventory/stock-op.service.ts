@@ -32,6 +32,7 @@ export class StockOpService {
   async list(tenantId: string, query: ListStockOpQueryDto) {
     const companyId = await defaultCompanyId(this.prisma, tenantId);
     return this.prisma.stockOp.findMany({
+      take: 500,
       where: {
         tenantId,
         companyId,

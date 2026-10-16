@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
 
@@ -102,6 +108,11 @@ export class ApprovalService {
         include: { steps: { orderBy: { stepOrder: 'asc' } } },
       });
       if (!request) throw new NotFoundException('Approval tidak ditemukan atau sudah diselesaikan.');
+
+      // Segregasi tugas: pemohon tidak boleh menyetujui/menolak dokumennya sendiri.
+      if (request.submittedById === actorId) {
+        throw new ForbiddenException('Anda tidak boleh memutuskan approval yang Anda ajukan sendiri.');
+      }
 
       const step = request.steps.find((candidate) => candidate.stepOrder === request.currentStep);
       if (!step || step.status !== 'pending') throw new ConflictException('Tahap approval tidak lagi menunggu keputusan.');
