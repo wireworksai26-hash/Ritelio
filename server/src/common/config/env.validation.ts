@@ -4,6 +4,18 @@ const PLACEHOLDER_MARKERS = ['ganti-dengan', 'changeme', 'your-secret', 'secret1
 
 const MIN_SECRET_LENGTH = 32;
 
+/**
+ * Origin CORS yang berlaku. CORS_ORIGIN menang bila diisi. Bila kosong dan berjalan di Railway,
+ * dipakai domain publik service itu sendiri (RAILWAY_PUBLIC_DOMAIN), yang cocok untuk deploy satu
+ * service ketika frontend dan API satu domain.
+ */
+export function resolveCorsOrigins(env: EnvConfig): string[] {
+  const explicit = parseCorsOrigins(env.CORS_ORIGIN);
+  if (explicit.length > 0) return explicit;
+  const railwayDomain = env.RAILWAY_PUBLIC_DOMAIN?.trim();
+  return railwayDomain ? [`https://${railwayDomain}`] : [];
+}
+
 /** Pecah CORS_ORIGIN (dipisah koma) menjadi daftar origin bersih. */
 export function parseCorsOrigins(raw: string | undefined): string[] {
   return (raw ?? '')
@@ -61,7 +73,7 @@ export function validateConfig(config: EnvConfig): EnvConfig {
 
   // CORS: dengan credentials:true, wildcard tidak boleh dipakai; di produksi origin wajib eksplisit.
   const isProduction = config.NODE_ENV === 'production';
-  const corsOrigins = parseCorsOrigins(config.CORS_ORIGIN);
+  const corsOrigins = resolveCorsOrigins(config);
   if (isProduction && corsOrigins.length === 0) {
     errors.push('CORS_ORIGIN wajib diisi di produksi (daftar origin dipisah koma, mis. https://app.contoh.com)');
   }

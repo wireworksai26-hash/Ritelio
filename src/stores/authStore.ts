@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Role, User } from '../types';
 import { isNetworkError } from '../lib/offline';
-import { API_NOT_CONFIGURED_MESSAGE, SESSION_EXPIRED_EVENT, apiConfigured, apiFetch, clearTokens, revokeSession, setTokens } from '../lib/api';
+import { SESSION_EXPIRED_EVENT, apiConfigured, apiFetch, clearTokens, revokeSession, setTokens } from '../lib/api';
 import { useBusinessStore } from './businessStore';
 import { useOutletStore } from './outletStore';
 
@@ -12,9 +12,30 @@ interface LoginResponse {
   user: { id: string; tenantId: string; name: string; email: string; role: Role; tenantName: string; plan: string };
 }
 
+export interface RegisterOwnerInput {
+  businessName: string;
+  industryTemplate: 'retail' | 'manufacturing' | 'services';
+  ownerName: string;
+  email: string;
+  password: string;
+}
+
+function userFromResponse(res: LoginResponse): User {
+  return {
+    id: res.user.id,
+    tenant_id: res.user.tenantId,
+    name: res.user.name,
+    email: res.user.email,
+    role: res.user.role,
+    permissions: {},
+  };
+}
+
 interface AuthState {
   user: User | null;
   login: (email: string, password: string) => Promise<User>;
+  /** Daftarkan bisnis + akun owner di server (POST /v1/auth/register) dan langsung masuk. */
+  registerOwner: (input: RegisterOwnerInput) => Promise<User>;
   loginAsRole: (role: Role) => User;
   setUser: (user: User) => void;
   logout: () => void;
@@ -35,14 +56,7 @@ export const useAuthStore = create<AuthState>()(
               body: JSON.stringify({ email: cleanEmail, password: cleanPassword }),
             });
             setTokens(res.accessToken, res.refreshToken);
-            const user: User = {
-              id: res.user.id,
-              tenant_id: res.user.tenantId,
-              name: res.user.name,
-              email: res.user.email,
-              role: res.user.role,
-              permissions: {},
-            };
+            const user = userFromResponse(res);
             set({ user });
 
             // Sinkronkan data bisnis dari backend database
@@ -60,7 +74,7 @@ export const useAuthStore = create<AuthState>()(
         // Fallback lokal hanya untuk pengembangan/demo. Di build produksi login selalu lewat server:
         // fallback ini menerima sandi kosong dan sandi umum untuk akun lokal mana pun.
         if (!import.meta.env.DEV) {
-          throw new Error(API_NOT_CONFIGURED_MESSAGE);
+          throw new Error('Tidak dapat masuk saat ini. Periksa koneksi internet Anda lalu coba lagi.');
         }
 
         // Ambil daftar user dari businessStore
@@ -155,6 +169,23 @@ export const useAuthStore = create<AuthState>()(
         return found;
       },
 
+      registerOwner: async (input) => {
+        const res = await apiFetch<LoginResponse>('/v1/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({
+            businessName: input.businessName.trim(),
+            industryTemplate: input.industryTemplate,
+            ownerName: input.ownerName.trim(),
+            email: input.email.trim().toLowerCase(),
+            password: input.password,
+          }),
+        });
+        setTokens(res.accessToken, res.refreshToken);
+        const user = userFromResponse(res);
+        set({ user });
+        useBusinessStore.getState().fetchBusinessData().catch(() => {});
+        return user;
+      },
       loginAsRole: (role) => {
         const bizState = useBusinessStore.getState();
         if (role !== 'superadmin' && (bizState.tenant?.name === 'Kopi Kelana' || bizState.tenant?.id === 'tenant-1')) {

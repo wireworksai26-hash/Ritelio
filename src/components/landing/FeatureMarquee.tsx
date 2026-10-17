@@ -11,7 +11,7 @@ const ROW_1 = [
 const ROW_2 = [
   'POS Offline', 'Scan Barcode', 'Reorder Otomatis', 'Purchase Order', 'BOM & MRP',
   'Kontrol Mutu', 'Absensi & Cuti', 'Payroll PPh 21', 'Lead & Penawaran', 'Armada & Pengiriman',
-  'Proyek & Gantt', 'Sensor IoT', 'OCR Invoice', 'Tanya AI', 'PWA di HP',
+  'Proyek & Gantt', 'Sensor IoT', 'OCR Invoice', 'Asisten AI 24 Jam', 'PWA di HP',
 ];
 
 function ChipRow({ items, reverse, className }: { items: string[]; reverse?: boolean; className?: string }) {

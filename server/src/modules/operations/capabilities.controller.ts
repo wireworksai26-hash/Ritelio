@@ -14,6 +14,7 @@ import {
   IngestReadingDto,
   ManualTrackingDto,
   MoveStageDto,
+  EmployeeScoreQueryDto,
   PeriodQueryDto,
   RecordActualDto,
   RegisterCarrierDto,
@@ -247,7 +248,7 @@ export class CapabilitiesController {
 
   @Get('performance/score')
   @RequirePermissions('settings:write')
-  employeeScore(@Tenant() tenantId: string, @Query() query: PeriodQueryDto & { employeeId: string }) {
+  employeeScore(@Tenant() tenantId: string, @Query() query: EmployeeScoreQueryDto) {
     return this.performance.employeeScore(tenantId, query.employeeId, query.period ?? '');
   }
 

@@ -8,7 +8,11 @@ import { PriceInputWithQuickAdd } from '../components/ui/PriceInputWithQuickAdd'
 import { Icon, type IconName } from '../components/icons/Icon';
 import { Logo, LogoMark } from '../components/layout/Logo';
 import { Reveal } from '../components/Reveal';
+import { apiFetch } from '../lib/api';
 import { cn } from '../lib/format';
+import { isNetworkError } from '../lib/offline';
+import { PASSWORD_HINT, ownerAccountProblem } from '../lib/onboardingValidation';
+import { listOf } from '../lib/useResource';
 import { useAuthStore } from '../stores/authStore';
 import { useBusinessStore } from '../stores/businessStore';
 import { useModuleStore } from '../stores/moduleStore';
@@ -63,6 +67,7 @@ export default function Onboarding() {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [showPass, setShowPass] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     businessName: '',
     industry: 'retail' as IndustryTemplate,
@@ -80,39 +85,108 @@ export default function Onboarding() {
 
   const next = () => setStep((s) => Math.min(TOTAL_STEPS - 1, s + 1));
 
-  function finish() {
+  // Mode demo lokal tanpa backend. Hanya dipakai di build dev saat server tidak terjangkau.
+  function finishLocally() {
     const cleanSlug = form.businessName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'usaha';
-    const emailToUse = form.ownerEmail.trim() || `owner@${cleanSlug}.id`;
-    const passwordToUse = form.ownerPassword.trim() || '123456';
-    const nameToUse = form.ownerName.trim() || `Owner ${form.businessName || 'Bisnis'}`;
-
-    const { tenant: newTenant, outlet: newOutlet, product: newProduct, ownerUser } =
-      useBusinessStore.getState().registerBusiness({
-        businessName: form.businessName,
-        industry: form.industry,
-        subscriptionPlan: form.subscriptionPlan,
-        ownerName: nameToUse,
-        ownerEmail: emailToUse,
-        ownerPassword: passwordToUse,
-        outletName: form.outletName,
-        outletAddress: form.outletAddress,
-        productName: form.productName,
-        productUnit: form.productUnit,
-        productPrice: form.productPrice,
-        productStock: form.productStock,
-      });
-
+    const { tenant: newTenant, outlet: newOutlet, ownerUser } = useBusinessStore.getState().registerBusiness({
+      businessName: form.businessName,
+      industry: form.industry,
+      subscriptionPlan: form.subscriptionPlan,
+      ownerName: form.ownerName.trim() || `Owner ${form.businessName || 'Bisnis'}`,
+      ownerEmail: form.ownerEmail.trim() || `owner@${cleanSlug}.id`,
+      ownerPassword: form.ownerPassword,
+      outletName: form.outletName,
+      outletAddress: form.outletAddress,
+      productName: form.productName,
+      productUnit: form.productUnit,
+      productPrice: form.productPrice,
+      productStock: form.productStock,
+    });
     useAuthStore.getState().setUser(ownerUser);
     useOutletStore.getState().setSelected(newOutlet.id);
     useModuleStore.getState().setTemplate(form.industry);
-
     toast({
       title: `Selamat datang di ${newTenant.name}!`,
-      description: `Paket ${form.subscriptionPlan.toUpperCase()} & Outlet ${newOutlet.name} siap digunakan.`,
+      description: `Mode demo lokal: data hanya tersimpan di browser ini.`,
+      icon: 'info',
+    });
+    navigate('/app');
+  }
+
+  // Daftar di server: bisnis + akun owner, lalu outlet dan produk awal. Akun adalah yang terpenting;
+  // bila outlet/produk gagal tersimpan, pengguna tetap masuk dan diberi tahu apa yang perlu ditambah manual.
+  async function registerOnServer() {
+    const user = await useAuthStore.getState().registerOwner({
+      businessName: form.businessName,
+      industryTemplate: form.industry,
+      ownerName: form.ownerName,
+      email: form.ownerEmail,
+      password: form.ownerPassword,
+    });
+    useModuleStore.getState().setTemplate(form.industry);
+
+    let setupNote = '';
+    try {
+      const outlet = await apiFetch<{ id: string; name: string }>('/v1/outlets', {
+        method: 'POST',
+        body: JSON.stringify({ name: form.outletName.trim() || 'Outlet Utama', address: form.outletAddress.trim() }),
+      });
+      useOutletStore.getState().setSelected(outlet.id);
+
+      if (form.productName.trim()) {
+        const warehouses = listOf<{ id: string; outletId?: string | null }>(await apiFetch('/v1/inventory/warehouses'));
+        const warehouse = warehouses.find((w) => w.outletId === outlet.id) ?? warehouses[0];
+        const stock = Number(form.productStock) || 0;
+        await apiFetch('/v1/inventory/products', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: form.productName.trim(),
+            unit: form.productUnit.trim() || 'pcs',
+            sellPrice: Number(form.productPrice) || 0,
+            ...(stock > 0 && warehouse ? { initialStock: stock, warehouseId: warehouse.id } : {}),
+          }),
+        });
+      }
+    } catch {
+      setupNote = ' Outlet atau produk awal belum tersimpan; tambahkan dari menu Pengaturan dan Inventori.';
+    }
+
+    await useBusinessStore.getState().fetchBusinessData().catch(() => {});
+    toast({
+      title: `Selamat datang, ${user.name}!`,
+      description: `Akun ${form.businessName.trim()} siap dipakai.${setupNote}`,
       icon: 'check',
     });
     navigate('/app');
   }
+
+  async function finish() {
+    if (submitting) return;
+    const problem = ownerAccountProblem(form);
+    if (problem) {
+      setStep(0);
+      toast({ title: 'Lengkapi akun owner dulu', description: problem, icon: 'warning' });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await registerOnServer();
+    } catch (err) {
+      if (import.meta.env.DEV && isNetworkError(err)) {
+        finishLocally();
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Coba lagi sebentar lagi.';
+      // Galat soal akun (email sudah dipakai, kata sandi ditolak) hanya bisa dibetulkan di langkah pertama.
+      if (/email|kata sandi|terdaftar/i.test(message)) setStep(0);
+      toast({ title: 'Pendaftaran gagal', description: message, icon: 'warning' });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const ownerProblem = ownerAccountProblem(form);
 
   const meta = stepMeta[step];
 
@@ -167,12 +241,7 @@ export default function Onboarding() {
                   value={form.businessName}
                   onChange={(e) => {
                     const bName = e.target.value;
-                    const slug = bName.toLowerCase().replace(/[^a-z0-9]/g, '');
-                    setForm({
-                      ...form,
-                      businessName: bName,
-                      ownerEmail: form.ownerEmail || (slug ? `owner@${slug}.id` : ''),
-                    });
+                    setForm({ ...form, businessName: bName });
                   }}
                   required
                 />
@@ -203,6 +272,7 @@ export default function Onboarding() {
                     label="Email Login Owner"
                     type="email"
                     placeholder="mis. owner@geprekjuara.id"
+                    autoComplete="email"
                     value={form.ownerEmail}
                     onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })}
                     hint="Digunakan untuk masuk ke sistem dan mengelola bisnis"
@@ -211,7 +281,9 @@ export default function Onboarding() {
                     <Input
                       label="Kata Sandi Akun Owner"
                       type={showPass ? 'text' : 'password'}
-                      placeholder="Minimal 6 karakter (mis. juara123)"
+                      placeholder="Buat kata sandi"
+                      autoComplete="new-password"
+                      hint={PASSWORD_HINT}
                       value={form.ownerPassword}
                       onChange={(e) => setForm({ ...form, ownerPassword: e.target.value })}
                     />
@@ -224,6 +296,11 @@ export default function Onboarding() {
                       {showPass ? 'Sembunyikan' : 'Lihat'}
                     </button>
                   </div>
+                  {ownerProblem && (form.ownerName || form.ownerEmail || form.ownerPassword) && (
+                    <p className="text-caption text-rose-700" role="alert">
+                      {ownerProblem}
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -452,7 +529,7 @@ export default function Onboarding() {
             </Button>
           )}
           {step === TOTAL_STEPS - 1 && (
-            <Button variant="ghost" onClick={finish}>
+            <Button variant="ghost" onClick={finish} disabled={submitting}>
               Nanti saja
             </Button>
           )}
@@ -461,13 +538,13 @@ export default function Onboarding() {
           <Button
             iconRight="arrow-right"
             onClick={next}
-            disabled={step === 0 && !form.businessName.trim()}
+            disabled={step === 0 && ownerProblem !== null}
           >
             Lanjut
           </Button>
         ) : (
-          <Button icon="check" onClick={finish}>
-            Selesai & buka Dashboard
+          <Button icon="check" onClick={finish} disabled={submitting}>
+            {submitting ? 'Mendaftarkan akun…' : 'Selesai & buka Dashboard'}
           </Button>
         )}
       </footer>

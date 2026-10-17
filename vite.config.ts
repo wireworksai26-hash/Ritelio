@@ -121,44 +121,15 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2,png}'],
         navigateFallback: 'index.html',
-        runtimeCaching: [
-          {
-            // Katalog produk & stok: Stale-While-Revalidate
-            urlPattern: /^https:\/\/api\.retalio\.io\/v1\/(products|inventory|stock|categories)/,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'retalio-catalog',
-              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 },
-            },
-          },
-          {
-            // Transaksi POS (write): Network Only + Background Sync queue
-            urlPattern: /^https:\/\/api\.retalio\.io\/v1\/sales\/transactions/,
-            handler: 'NetworkOnly',
-            method: 'POST',
-            options: {
-              backgroundSync: {
-                name: 'retalio-pos-queue',
-                options: { maxRetentionTime: 24 * 60 },
-              },
-            },
-          },
-          {
-            // Laporan keuangan: Network First + fallback cache
-            urlPattern: /^https:\/\/api\.retalio\.io\/v1\/(finance|reports)/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'retalio-reports',
-              networkTimeoutSeconds: 4,
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 },
-            },
-          },
-          {
-            // Endpoint AI: Network Only — UI menampilkan pesan "butuh koneksi" saat offline
-            urlPattern: /^https:\/\/api\.retalio\.io\/v1\/ai/,
-            handler: 'NetworkOnly',
-          },
-        ],
+        // Navigasi ke API (mis. membuka /v1/health di tab browser) tidak boleh dijawab index.html oleh SW.
+        navigateFallbackDenylist: [/^\/v1\//, /^\/api-sync\//],
+        // Sengaja TANPA runtimeCaching untuk API:
+        // - Cache SW berkunci URL, bukan pengguna. Respons ber-token yang di-cache bisa terbaca pengguna lain
+        //   di perangkat bersama (tablet kasir) saat offline.
+        // - Antrean transaksi offline POS ditangani aplikasi (lib/offlineQueue.ts); aturan background sync di SW
+        //   akan menggandakan antrean itu.
+        // Yang di-precache hanya app shell (JS/CSS/HTML/font/ikon). Data ERP butuh koneksi; saat offline
+        // aplikasi menampilkan pesan yang jelas (lib/offline.ts).
       },
       devOptions: { enabled: false },
     }),

@@ -137,19 +137,32 @@ function SdmVisual() {
   );
 }
 
-function PahamiVisual() {
+function AsistenVisual() {
   return (
     <Card className="p-5 bg-bone">
-      <div className="ml-auto max-w-[85%] rounded-xl bg-sand px-3.5 py-2.5 text-body-sm text-ink">
-        Berapa laba bersih minggu ini?
+      <div className="flex items-center justify-between">
+        <Badge variant="accent" icon="assistant">Asisten 24 Jam</Badge>
+        <span className="inline-flex items-center gap-1.5 text-caption text-fossil">
+          <span className="h-1.5 w-1.5 rounded-full bg-olive animate-pulse" aria-hidden="true" />
+          Siap menjawab
+        </span>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {['Stok apa yang menipis?', 'Produk terlaris?', 'Laba 30 hari terakhir?', 'Arus kas bulan depan?'].map((q) => (
+          <span key={q} className="rounded-full border border-ash bg-paper px-3 py-1 text-caption text-smoke">
+            {q}
+          </span>
+        ))}
+      </div>
+      <div className="mt-4 ml-auto max-w-[85%] rounded-xl bg-sand px-3.5 py-2.5 text-body-sm text-ink">
+        Stok apa yang menipis?
       </div>
       <div className="mt-3 rounded-xl border border-ash bg-paper px-4 py-3">
-        <Badge variant="accent" icon="assistant">AI</Badge>
-        <p className="mt-2 text-body-sm text-ink leading-relaxed">
-          Laba bersih 7 hari terakhir Rp 2,84 jt dengan margin kotor 46%. Sabtu adalah hari terbaikmu.
+        <p className="text-body-sm text-ink leading-relaxed">
+          Ada 2 produk di bawah ambang minimum: Croissant Mentega (sisa 6) dan Donat Gula (habis). Mau saya siapkan draf PO?
         </p>
         <p className="mt-2.5 border-t border-sand pt-2 text-caption text-fossil">
-          Berdasarkan: sales_transactions:7 hari
+          Berdasarkan: inventory_stock:threshold
         </p>
       </div>
     </Card>
@@ -162,8 +175,10 @@ interface FeatureTab {
   eyebrow: string;
   heading: string;
   body: string;
-  links: string[];
+  links: Array<{ label: string; href: string }>;
   visual: ReactNode;
+  /** Tab yang sengaja dibuat menonjol (mis. asisten AI) agar tidak terlewat saat pengunjung memindai tab. */
+  highlight?: boolean;
 }
 
 const TABS: FeatureTab[] = [
@@ -173,7 +188,7 @@ const TABS: FeatureTab[] = [
     eyebrow: 'KASIR, PENJUALAN, CRM',
     heading: 'Jual di toko, lacak prospek, kirim penawaran.',
     body: 'Kasir menerima tunai, QRIS, debit, dan transfer, dan tetap jalan saat internet putus. Untuk penjualan ke perusahaan lain, catat prospek sampai peluang, buat penawaran, ubah jadi pesanan, lalu terbitkan faktur.',
-    links: ['Lihat modul penjualan'],
+    links: [{ label: 'Lihat modul penjualan', href: '#modul' }],
     visual: <JualVisual />,
   },
   {
@@ -182,7 +197,10 @@ const TABS: FeatureTab[] = [
     eyebrow: 'INVENTORI & PENGADAAN',
     heading: 'Tahu stok yang tersisa dan kapan harus beli.',
     body: 'Stok per gudang, transfer antar gudang, dan stock opname dengan scan barcode. Saat stok menyentuh batas minimum, Retalio menyusun draf PO per pemasok. Permintaan pembelian disetujui dulu, lalu PO dikirim lewat WhatsApp atau email.',
-    links: ['Lihat modul gudang', 'Lihat modul pengadaan'],
+    links: [
+      { label: 'Lihat modul gudang', href: '#modul' },
+      { label: 'Lihat modul pengadaan', href: '#modul' },
+    ],
     visual: <KelolaVisual />,
   },
   {
@@ -191,7 +209,10 @@ const TABS: FeatureTab[] = [
     eyebrow: 'MANUFAKTUR, PROYEK, LOGISTIK',
     heading: 'Rencanakan produksi sampai barangnya terkirim.',
     body: 'Susun BOM bertingkat, hitung kebutuhan bahan lewat MRP, jadwalkan mesin, dan catat pemeriksaan mutu di tiap tahap. Untuk bisnis jasa ada proyek dengan milestone, jam kerja yang bisa ditagihkan ke klien, serta armada dan perawatan berkala.',
-    links: ['Lihat modul manufaktur', 'Lihat modul proyek'],
+    links: [
+      { label: 'Lihat modul manufaktur', href: '#modul' },
+      { label: 'Lihat modul proyek', href: '#modul' },
+    ],
     visual: <ProduksiVisual />,
   },
   {
@@ -200,7 +221,7 @@ const TABS: FeatureTab[] = [
     eyebrow: 'AKUNTANSI & PAJAK',
     heading: 'Pembukuan yang terisi dari transaksi harian.',
     body: 'Penjualan, penerimaan barang, dan penggajian menjadi jurnal di buku besar. Ada piutang dan utang, rekonsiliasi bank, penyusutan aset tetap, PPN otomatis, serta laporan laba rugi, neraca, dan arus kas. Periode yang sudah ditutup tidak menerima jurnal baru.',
-    links: ['Lihat modul keuangan'],
+    links: [{ label: 'Lihat modul keuangan', href: '#modul' }],
     visual: <KeuanganVisual />,
   },
   {
@@ -209,17 +230,18 @@ const TABS: FeatureTab[] = [
     eyebrow: 'ABSENSI, CUTI, PAYROLL',
     heading: 'Absensi, cuti, dan gaji di satu tempat.',
     body: 'Catat kehadiran dan lembur, kelola pengajuan cuti, lalu hitung gaji lengkap dengan PPh 21 dan posting ke jurnal. Rekrutmen berjalan dari lowongan sampai karyawan baru, dengan target KPI per orang.',
-    links: ['Lihat modul SDM'],
+    links: [{ label: 'Lihat modul SDM', href: '#modul' }],
     visual: <SdmVisual />,
   },
   {
-    id: 'pahami',
-    label: 'Pahami',
+    id: 'asisten',
+    label: 'Asisten 24 Jam',
     eyebrow: 'RETALIO INTELLIGENCE',
-    heading: 'Tanya datamu dengan bahasa sehari-hari.',
-    body: 'Tanyakan penjualan, stok, atau proyeksi kas. Jawabannya memakai data aktual dan menyebut sumbernya. Retalio Intelligence juga membaca foto invoice pemasok dan menyarankan pembelian, tetapi tidak menjalankan apa pun tanpa persetujuanmu.',
-    links: ['Kenali Retalio Intelligence'],
-    visual: <PahamiVisual />,
+    heading: 'Ada apa-apa, langsung tanya.',
+    body: 'Stok menipis, laba turun, atau arus kas seret? Tanyakan kapan pun lewat chat di aplikasi, dengan bahasa sehari-hari. Asisten menjawab dari data bisnismu dan menyebut sumbernya. Ia juga membaca foto invoice pemasok dan menyarankan pembelian, tetapi tidak menjalankan apa pun tanpa persetujuanmu.',
+    links: [{ label: 'Lihat paket dengan asisten AI', href: '#harga' }],
+    visual: <AsistenVisual />,
+    highlight: true,
   },
 ];
 
@@ -244,11 +266,16 @@ export function FeatureTabs() {
               aria-selected={active === i}
               onClick={() => setActive(i)}
               className={cn(
-                'rounded-lg px-3 py-1.5 sm:px-4 sm:py-2 text-[20px] sm:text-[26px] lg:text-heading-lg font-light leading-tight transition-colors duration-150',
-                active === i ? 'bg-sand text-ink' : 'text-pebble hover:text-fossil',
+                'inline-flex items-center gap-2 rounded-lg px-3 py-1.5 sm:px-4 sm:py-2 text-[20px] sm:text-[26px] lg:text-heading-lg font-light leading-tight transition-colors duration-150',
+                active === i ? 'bg-sand text-ink' : t.highlight ? 'text-ink hover:bg-sand/60' : 'text-pebble hover:text-fossil',
               )}
             >
               {t.label}
+              {t.highlight && (
+                <span className="rounded-md bg-chartreuse px-1.5 py-0.5 text-[11px] font-medium leading-none text-[#1c1c1c]">
+                  AI
+                </span>
+              )}
             </button>
             <span className="mx-3 sm:mx-4 mt-1 h-[2px] rounded-full bg-sand overflow-hidden">
               {active === i && (
@@ -274,11 +301,11 @@ export function FeatureTabs() {
           <div className="mt-6 space-y-2.5">
             {tab.links.map((l) => (
               <a
-                key={l}
-                href="#modul"
+                key={l.label}
+                href={l.href}
                 className="group flex w-fit items-center gap-2 text-[15px] text-ink"
               >
-                <span className="underline decoration-olive underline-offset-4">{l}</span>
+                <span className="underline decoration-olive underline-offset-4">{l.label}</span>
                 <Icon name="arrow-right" size={15} className="transition-transform duration-150 group-hover:translate-x-0.5" />
               </a>
             ))}

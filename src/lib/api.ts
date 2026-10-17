@@ -1,15 +1,16 @@
 // Klien API Retalio — terhubung langsung ke Backend NestJS API & PostgreSQL
 import { selectedCompanyId } from '../stores/companyStore';
 
-// Dev: default ke backend lokal. Produksi: VITE_API_URL WAJIB diisi saat build. Tanpa itu, default
-// "localhost" akan menunjuk ke komputer pengunjung sendiri dan semua data gagal dimuat tanpa petunjuk.
+// Alamat API:
+// - VITE_API_URL diisi (saat build): dipakai apa adanya. Untuk frontend dan backend di domain terpisah.
+// - Kosong di dev: backend lokal.
+// - Kosong di produksi: asal yang sama (path relatif "/v1/..."). Untuk deploy satu service, ketika backend
+//   melayani file frontend. Bila frontend ternyata dilayani tanpa API di belakangnya, apiFetch mendeteksi
+//   jawaban berupa halaman HTML dan menjelaskan penyebabnya (lihat di bawah).
 const ENV_API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? '').trim().replace(/\/$/, '');
 const RAW_BASE = ENV_API_URL || (import.meta.env.DEV ? 'http://localhost:4000/v1' : '');
 
-export const API_NOT_CONFIGURED_MESSAGE =
-  'Alamat server belum diatur pada aplikasi ini (VITE_API_URL kosong saat build). Hubungi administrator.';
-
-/** Alamat server API yang dituju (untuk pesan galat dan diagnosis). Kosong bila belum dikonfigurasi. */
+/** Alamat server API yang dituju. Kosong = asal yang sama dengan halaman. */
 export function apiBaseUrl(): string {
   return RAW_BASE;
 }
@@ -25,7 +26,7 @@ export function getCleanApiUrl(path: string): string {
 }
 
 export function apiConfigured(): boolean {
-  return RAW_BASE !== '';
+  return true;
 }
 
 export function getToken(): string | null {
@@ -124,14 +125,13 @@ export async function revokeSession(): Promise<void> {
 
 function apiHost(): string {
   try {
-    return new URL(RAW_BASE, window.location.href).host;
+    return new URL(RAW_BASE || '/', window.location.href).host;
   } catch {
-    return RAW_BASE;
+    return RAW_BASE || 'asal yang sama';
   }
 }
 
 async function request(path: string, options: RequestInit, timeoutMs: number): Promise<Response> {
-  if (!apiConfigured()) throw new Error(API_NOT_CONFIGURED_MESSAGE);
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -178,7 +178,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, timeo
   // Tanpa pemeriksaan ini hasilnya {} diam-diam dan layar hanya menampilkan "gagal memuat data".
   if (res.ok && (res.headers.get('content-type') ?? '').includes('text/html')) {
     throw new Error(
-      `Alamat API salah: ${apiHost()} mengembalikan halaman web, bukan data. Periksa VITE_API_URL: harus menunjuk ke service backend, bukan ke situs frontend.`,
+      `Alamat API salah: ${apiHost()} mengembalikan halaman web, bukan data. Frontend ini dilayani tanpa backend di belakangnya. Isi VITE_API_URL dengan alamat service backend lalu build ulang, atau deploy backend dan frontend sebagai satu service.`,
     );
   }
 

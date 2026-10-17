@@ -1,87 +1,114 @@
 # Deploy Retalio ke Railway
 
-Retalio terdiri dari **tiga komponen**, dan masing-masing harus ada di Railway:
+Ada dua cara. **Opsi A (satu service) disarankan**: frontend dan API ada di satu domain, jadi tidak ada
+`VITE_API_URL` yang bisa terlupa, tidak ada CORS, dan hanya satu service yang dirawat.
 
-| Komponen | Isi | Service Railway |
+| | Opsi A: satu service | Opsi B: dua service |
 |---|---|---|
-| Frontend (PWA) | React + Vite, folder root repo | service yang sudah ada (`ritelio-production.up.railway.app`) |
-| Backend (API) | NestJS + Prisma, folder `server/` | **service baru** |
-| Database | PostgreSQL | **plugin Postgres baru** |
+| Service | 1 (+ Postgres) | 2 (+ Postgres) |
+| Domain | 1 | 2 |
+| `VITE_API_URL` | tidak dipakai | wajib, saat build |
+| `CORS_ORIGIN` | otomatis (domain service itu sendiri) | wajib |
+| Cocok untuk | hampir semua kasus | bila frontend ingin di CDN/domain lain |
 
-Gejala "UI tampil tapi data gagal dimuat" hampir selalu berarti backend belum ada atau frontend belum
-menunjuk ke backend. Domain frontend dan domain backend **berbeda**.
+Gejala "UI tampil tapi data gagal dimuat" berarti frontend tidak punya API di belakangnya. Aplikasi akan
+menampilkan: *"Alamat API salah: ... mengembalikan halaman web, bukan data"*.
 
-## 1. Database
+---
 
+## Opsi A: satu service
+
+`Dockerfile` di root repo membangun frontend dan backend, lalu backend melayani keduanya. Railway memakai
+Dockerfile itu otomatis.
+
+### 1. Database
 Project Railway: **New** → **Database** → **PostgreSQL**.
 
-## 2. Backend (service baru)
+### 2. Service aplikasi
+Pakai service yang sudah ada (`ritelio-production`), atau buat baru dari repo yang sama.
 
-**New** → **GitHub Repo** (repo yang sama) → buka service → **Settings**:
-
-- **Root Directory**: `server`
-- **Build Command**: `npm ci && npm run build`
-- **Start Command**: `npm run start:prod` (menjalankan `prisma migrate deploy`, lalu server)
+**Settings**
+- **Root Directory**: kosong (root repo).
+- **Builder**: *Dockerfile*. Bila service ini dulu memakai Nixpacks, ubah ke Dockerfile.
+- **Custom Build Command** dan **Custom Start Command**: kosongkan. Perintah start sudah ada di Dockerfile
+  (`npm run start:prod`: migrasi database, lalu server).
 - **Healthcheck Path**: `/v1/health`
-- **Networking** → **Generate Domain**. Catat alamatnya, mis. `https://retalio-api-production.up.railway.app`.
-  Jangan set variabel `PORT` sendiri: Railway mengisinya dan domain mengikutinya.
 
-**Variables** (tab Variables):
+**Variables**
 
 | Variabel | Nilai |
 |---|---|
-| `NODE_ENV` | `production` |
 | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (referensi ke plugin Postgres) |
 | `JWT_SECRET` | string acak ≥ 32 karakter |
 | `JWT_REFRESH_SECRET` | string acak ≥ 32 karakter, **berbeda** dari `JWT_SECRET` |
-| `CORS_ORIGIN` | alamat frontend persis, `https://ritelio-production.up.railway.app` (tanpa `/` di akhir, tanpa path) |
-| `NIM_API_KEY` | opsional, hanya untuk fitur AI/OCR |
+| `PORT` | `4000` bila domain Anda sudah dipetakan ke port 4000 (Settings → Networking). Kosongkan bila ingin Railway menentukan sendiri. |
+| `NIM_API_KEY` | opsional, hanya untuk asisten AI dan OCR |
 
-Membuat secret acak:
+Hapus `VITE_API_URL` bila ada: pada opsi A alamat API otomatis sama dengan alamat halaman.
+`NODE_ENV=production` sudah diset di image. `CORS_ORIGIN` boleh dikosongkan: di Railway otomatis memakai
+domain service itu sendiri (`RAILWAY_PUBLIC_DOMAIN`).
+
+Membuat secret acak (jalankan dua kali, satu per secret):
 
 ```
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
-Jalankan dua kali (satu untuk tiap secret). `TRUST_PROXY` tidak perlu diisi: di Railway otomatis `1`.
-Tanpa itu semua pengunjung terlihat sebagai satu IP dan berbagi satu kuota request.
+### 3. Periksa
+1. Tunggu deploy `Active`, lalu buka `https://<domain-anda>/v1/health`.
+   Harus tampil `{"status":"ok","database":"up"}`.
+2. Di **Deploy Logs** harus ada baris seperti
+   `[config] NODE_ENV=production | trust proxy=1 | CORS origin=https://... | web=/app/public`.
+   `web=tidak dilayani` berarti image dibangun tanpa frontend (cek Builder).
+3. Buka `https://<domain-anda>/`: tampil landing page. Daftar lewat `/onboarding`, lalu login.
 
-## 3. Frontend (service yang sudah ada)
+---
 
-**Variables** → tambahkan:
+## Opsi B: dua service (frontend dan backend terpisah)
 
-| Variabel | Nilai |
+**Backend** (service baru): Root Directory `server`, Build `npm ci && npm run build`, Start
+`npm run start:prod`, Healthcheck `/v1/health`, lalu **Generate Domain**.
+
+| Variabel backend | Nilai |
 |---|---|
-| `VITE_API_URL` | alamat backend dari langkah 2, mis. `https://retalio-api-production.up.railway.app` |
+| `NODE_ENV` | `production` |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+| `JWT_SECRET`, `JWT_REFRESH_SECRET` | dua secret acak ≥ 32 karakter, berbeda |
+| `CORS_ORIGIN` | alamat frontend persis, mis. `https://app-anda.up.railway.app` (tanpa `/` di akhir) |
 
-`VITE_*` dibaca **saat build**, bukan saat jalan. Setelah menambah atau mengubahnya, pastikan service
-**di-redeploy** (bukan sekadar restart) supaya ikut ter-build ulang. Tanpa variabel ini, build produksi
-akan menampilkan pesan "Alamat server belum diatur" (dulu: diam-diam memanggil `localhost` milik pengunjung).
+**Frontend** (service lain, root repo, tanpa Dockerfile; hapus Dockerfile dari build atau atur Builder ke
+Nixpacks): tambah variabel
 
-## 4. Periksa dari browser
+| Variabel frontend | Nilai |
+|---|---|
+| `VITE_API_URL` | alamat backend, mis. `https://api-anda.up.railway.app` |
 
-1. Buka `https://<alamat-backend>/v1/health`. Harus tampil `{"status":"ok","database":"up"}`.
-   - `database: down` / 503: `DATABASE_URL` salah atau Postgres belum siap.
-   - Halaman web / 404 / 502: backend belum jalan; lihat **Deploy Logs** service backend.
-2. Di log backend harus ada baris `[config] NODE_ENV=production | trust proxy=1 | CORS origin=https://ritelio-production...`.
-   Bila `CORS origin` tidak sama persis dengan alamat frontend, perbaiki `CORS_ORIGIN`.
-3. Buka frontend. Jika data gagal dimuat, tekan F12 → tab **Network**, klik permintaan yang merah:
+`VITE_*` dibaca **saat build**. Setelah mengubahnya, **Redeploy** (bukan Restart). Bila builder Dockerfile,
+variabel hanya terbaca bila ada `ARG VITE_API_URL` dan `ENV VITE_API_URL=$VITE_API_URL` sebelum
+`npm run build`.
+
+---
+
+## Diagnosis: data gagal dimuat
+
+Buka aplikasi, tekan **F12** → tab **Network**, muat ulang, klik permintaan yang merah.
 
 | Yang terlihat | Penyebab | Perbaikan |
 |---|---|---|
-| Alamat yang dituju `localhost` atau domain frontend sendiri | `VITE_API_URL` salah / belum ada saat build | isi `VITE_API_URL`, redeploy frontend |
-| `CORS error` / `blocked by CORS policy` | `CORS_ORIGIN` tidak sama dengan alamat frontend | samakan persis (skema `https://`, tanpa `/`), redeploy backend |
-| Status `502` | backend tidak jalan / crash saat boot | baca Deploy Logs backend |
-| Status `429` | kuota request habis | pastikan log menampilkan `trust proxy=1` |
-| Status `500` + pesan umum | tabel belum ada (migrasi belum jalan) atau error aplikasi | pastikan Start Command `npm run start:prod`; baca log |
-| Status `401` setelah login | token kedaluwarsa | login ulang |
+| Pesan "Alamat API salah ... halaman web" | tidak ada backend di belakang domain ini | Opsi A (Builder Dockerfile), atau Opsi B dengan `VITE_API_URL` |
+| Permintaan ke `localhost` | build dev/`VITE_API_URL` salah | build produksi tanpa `VITE_API_URL` (opsi A) atau isi dengan benar (opsi B) |
+| `CORS error` | opsi B: `CORS_ORIGIN` tidak sama dengan alamat frontend | samakan persis (`https://`, tanpa `/`), redeploy backend |
+| `502` | aplikasi crash saat start | baca Deploy Logs: biasanya variabel wajib belum diisi |
+| `503` di `/v1/health` | database tidak terjangkau | periksa `DATABASE_URL` dan status Postgres |
+| `429` | kuota request habis | pastikan log menampilkan `trust proxy=1` |
+| `500` pesan umum | migrasi belum jalan atau error aplikasi | Start Command harus `npm run start:prod`; baca log |
 
-## 5. Akun pertama
+## Akun pertama
 
 Database Railway kosong, dan **seed sengaja menolak jalan di production** karena ia menghapus data.
 
-- **Akun usaha (disarankan):** buka frontend → **Coba Gratis / Daftar** (`/onboarding`). Ini membuat
-  bisnis baru beserta akun owner dengan data Anda sendiri.
+- **Akun usaha (disarankan):** buka aplikasi → **Coba Gratis** (`/onboarding`). Ini membuat bisnis baru
+  beserta akun owner dengan data Anda sendiri.
 - **Data demo + superadmin (hanya untuk database kosong yang boleh dihapus):** jalankan seed sekali dari
   komputer Anda terhadap database Railway:
 
@@ -93,13 +120,14 @@ Database Railway kosong, dan **seed sengaja menolak jalan di production** karena
   ```
 
   Seed ini **menghapus seluruh data** di database itu. Jangan dijalankan setelah ada data asli.
-  Password `admin123` / `ferry123` hanya berlaku di mode pengembangan lokal, tidak di production.
+  Password `admin123` / `ferry123` hanya berlaku di mode pengembangan lokal.
 
-## Checklist ringkas
+## Checklist (opsi A)
 
 - [ ] Plugin Postgres ada
-- [ ] Service backend: Root `server`, Start `npm run start:prod`, domain dibuat
-- [ ] Backend: `NODE_ENV`, `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `CORS_ORIGIN`
-- [ ] `https://<backend>/v1/health` → `status: ok`
-- [ ] Frontend: `VITE_API_URL` = alamat backend, lalu redeploy
-- [ ] Daftar akun lewat `/onboarding`, lalu login
+- [ ] Builder = Dockerfile, tanpa custom build/start command
+- [ ] `DATABASE_URL`, `JWT_SECRET`, `JWT_REFRESH_SECRET` terisi (dan `PORT` sesuai domain)
+- [ ] `VITE_API_URL` dihapus
+- [ ] `/v1/health` → `status: ok`
+- [ ] Log memuat `web=/app/public`
+- [ ] Daftar lewat `/onboarding`, lalu login

@@ -50,7 +50,7 @@ function AiChatMini() {
         Thinking…
       </div>
       <div className="mt-2 rounded-lg border border-ash bg-bone p-3">
-        <Badge variant="accent" icon="assistant">AI</Badge>
+        <Badge variant="accent" icon="assistant">Asisten 24 Jam</Badge>
         <p className="text-caption text-ink mt-1.5">Penjualan hari ini Rp 412.000, naik 12% dari rata-rata mingguan.</p>
       </div>
     </Card>

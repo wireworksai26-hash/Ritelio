@@ -17,11 +17,11 @@ describe('alamat API', () => {
     expect(api.getCleanApiUrl('/v1/auth/login')).toBe('http://localhost:4000/v1/auth/login');
   });
 
-  it('produksi tanpa VITE_API_URL dianggap belum dikonfigurasi (bukan menunjuk ke localhost pengunjung)', async () => {
+  it('produksi tanpa VITE_API_URL memakai asal yang sama (path relatif), bukan localhost pengunjung', async () => {
     const api = await loadApi({ dev: false });
-    expect(api.apiConfigured()).toBe(false);
     expect(api.apiBaseUrl()).toBe('');
-    await expect(api.apiFetch('/v1/inventory/products')).rejects.toThrow(/VITE_API_URL/);
+    expect(api.getCleanApiUrl('/v1/inventory/products')).toBe('/v1/inventory/products');
+    expect(api.getCleanApiUrl('/v1/inventory/products')).not.toMatch(/localhost/);
   });
 
   it('produksi dengan VITE_API_URL tanpa /v1 menambahkan prefix sekali', async () => {
@@ -52,10 +52,20 @@ describe('respons yang bukan dari API', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('200 + HTML (VITE_API_URL menunjuk ke situs frontend) ditolak dengan pesan yang jelas', async () => {
+  it('200 + HTML (frontend dilayani tanpa backend / VITE_API_URL ke situs frontend) ditolak dengan pesan jelas', async () => {
     stubFetch(new Response('<!doctype html><html></html>', { status: 200, headers: { 'content-type': 'text/html' } }));
     const api = await loadApi({ dev: false, apiUrl: 'https://app.contoh.app' });
     await expect(api.apiFetch('/v1/crm/leads')).rejects.toThrow(/Alamat API salah.*VITE_API_URL/);
+  });
+
+  it('asal yang sama: request ke path relatif, dan HTML dari host statis tetap terdeteksi', async () => {
+    const fetchMock = vi.fn(async () => new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {}, removeItem: () => {} });
+    vi.stubGlobal('window', { location: { href: 'https://app.contoh.app/' }, dispatchEvent: () => true });
+    const api = await loadApi({ dev: false });
+    await expect(api.apiFetch('/v1/crm/leads')).rejects.toThrow(/Alamat API salah/);
+    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('/v1/crm/leads');
   });
 
   it('200 + JSON tetap diteruskan', async () => {

@@ -370,6 +370,18 @@ export class ReviewDto {
   submit?: boolean;
 }
 
+/** Skor KPI satu karyawan: employeeId wajib (tanpa itu 400, bukan "karyawan tidak ditemukan"). */
+export class EmployeeScoreQueryDto {
+  @IsString()
+  @Length(1, 64)
+  employeeId!: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(4, 10)
+  period?: string;
+}
+
 export class PeriodQueryDto {
   @IsOptional()
   @IsString()

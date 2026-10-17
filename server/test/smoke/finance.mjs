@@ -173,20 +173,20 @@ const bills = async () => (await call(T, 'GET', '/payables/bills')).body;
 const billOf = async (id) => (await bills()).find((b) => b.id === id);
 const mkBill = (body) => call(T, 'POST', '/payables/bills', { supplierId: 's-nb-1', ...body });
 
-const billA = await mkBill({ supplierInvoiceNumber: 'INV-A-001', billDate: '2026-10-01', applyTax: false, note: 'Servis oven', lines: [{ accountId: A['6400'], amount: 1000000, description: 'Servis' }] });
+const billA = await mkBill({ supplierInvoiceNumber: 'INV-A-001', billDate: TODAY, applyTax: false, note: 'Servis oven', lines: [{ accountId: A['6400'], amount: 1000000, description: 'Servis' }] });
 is('bill A tanpa PPN -> 201', billA, 201);
 check('bill A total 1.000.000, outstanding sama, status open', near(billA.body.total, 1000000) && near(billA.body.outstanding, 1000000) && billA.body.status === 'open', short(billA));
 check('bill A tanpa PPN: taxAmount 0', near(billA.body.taxAmount ?? 0, 0));
-check('bill A jatuh tempo = tanggal + termin 30 hari', billA.body.dueDate?.slice(0, 10) === '2026-10-31', billA.body.dueDate);
+check('bill A jatuh tempo = tanggal + termin 30 hari', billA.body.dueDate?.slice(0, 10) === new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10), billA.body.dueDate);
 check('bill A bernomor AP-YYYY-nnnnn', /^AP-\d{4}-\d{5}$/.test(billA.body.number ?? ''), billA.body.number);
 {
   const j = (await journalsOf('payables')).filter((x) => x.sourceRefId === billA.body.id);
   check('jurnal bill A: 1 jurnal seimbang (Dr 6400 / Cr 2000)', j.length === 1 && balanced(j[0]) && near(lineOf(j[0], '6400', 'debit')?.amount, 1000000) && near(lineOf(j[0], '2000', 'credit')?.amount, 1000000), json(j.map((x) => x.lines.length)));
   check('jurnal bill A tertaut ke journalId bill', j[0]?.id === billA.body.journalId);
 }
-is('faktur pemasok ganda ditolak 409', await mkBill({ supplierInvoiceNumber: 'INV-A-001', billDate: '2026-10-01', applyTax: false, lines: [{ accountId: A['6400'], amount: 1 }] }), 409);
-is('faktur ganda dengan spasi/varian ditolak 409', await mkBill({ supplierInvoiceNumber: ' INV-A-001 ', billDate: '2026-10-01', applyTax: false, lines: [{ accountId: A['6400'], amount: 1 }] }), 409);
-is('nomor faktur sama untuk pemasok BERBEDA boleh', await call(T, 'POST', '/payables/bills', { supplierId: 's-nb-2', supplierInvoiceNumber: 'INV-A-001', billDate: '2026-10-01', applyTax: false, lines: [{ accountId: A['6400'], amount: 1000 }] }), 201);
+is('faktur pemasok ganda ditolak 409', await mkBill({ supplierInvoiceNumber: 'INV-A-001', billDate: TODAY, applyTax: false, lines: [{ accountId: A['6400'], amount: 1 }] }), 409);
+is('faktur ganda dengan spasi/varian ditolak 409', await mkBill({ supplierInvoiceNumber: ' INV-A-001 ', billDate: TODAY, applyTax: false, lines: [{ accountId: A['6400'], amount: 1 }] }), 409);
+is('nomor faktur sama untuk pemasok BERBEDA boleh', await call(T, 'POST', '/payables/bills', { supplierId: 's-nb-2', supplierInvoiceNumber: 'INV-A-001', billDate: TODAY, applyTax: false, lines: [{ accountId: A['6400'], amount: 1000 }] }), 201);
 
 // Bayar A
 is('bayar lebih dari sisa ditolak 400', await call(T, 'POST', `/payables/bills/${billA.body.id}/pay`, { amount: 1000000.01 }), 400);
@@ -209,7 +209,7 @@ is('bayar faktur paid ditolak 400', await call(T, 'POST', `/payables/bills/${bil
 check('A: outstanding 0 & status paid di daftar', near((await billOf(billA.body.id)).outstanding, 0) && (await billOf(billA.body.id)).status === 'paid');
 
 // Bill B dengan PPN (3 baris, campuran beban & aset)
-const billB = await mkBill({ supplierInvoiceNumber: 'INV-B-777', billDate: '2026-10-02', lines: [
+const billB = await mkBill({ supplierInvoiceNumber: 'INV-B-777', billDate: TODAY, lines: [
   { accountId: A['6400'], amount: 500000 }, { accountId: A['1100'], amount: 300000, description: 'Bahan' }] });
 is('bill B dengan PPN (default) -> 201', billB, 201);
 check('B: DPP 800.000, PPN 88.000, taxTotal 888.000', near(billB.body.total, 800000) && near(billB.body.taxAmount, 88000) && near(billB.body.taxTotal, 888000), short(billB));
@@ -236,7 +236,7 @@ is('bayar sisa gross B 588.000 -> 201', payB2, 201);
 check('B -> paid setelah lunas termasuk PPN', payB2.body.billStatus === 'paid', short(payB2));
 
 // Bill dengan pembulatan sen
-const billF = await mkBill({ supplierInvoiceNumber: 'INV-F-ROUND', billDate: '2026-10-03', lines: [{ accountId: A['6400'], amount: 333333.33 }] });
+const billF = await mkBill({ supplierInvoiceNumber: 'INV-F-ROUND', billDate: TODAY, lines: [{ accountId: A['6400'], amount: 333333.33 }] });
 is('bill F nominal sen -> 201', billF, 201);
 check('F: PPN 36.666,67 dan taxTotal 370.000,00', near(billF.body.taxAmount, 36666.67) && near(billF.body.taxTotal, 370000), short(billF));
 {
@@ -245,9 +245,12 @@ check('F: PPN 36.666,67 dan taxTotal 370.000,00', near(billF.body.taxAmount, 366
 }
 
 // Aging
-const billC = await mkBill({ supplierInvoiceNumber: 'INV-C', billDate: '2026-07-01', dueDate: '2026-07-15', applyTax: false, lines: [{ accountId: A['6400'], amount: 250000 }] });
-const billD = await mkBill({ supplierInvoiceNumber: 'INV-D', billDate: '2026-09-10', dueDate: '2026-09-20', applyTax: false, lines: [{ accountId: A['6400'], amount: 100000 }] });
-const billE = await call(T, 'POST', '/payables/bills', { supplierId: 's-nb-3', supplierInvoiceNumber: 'INV-E', billDate: '2026-10-10', applyTax: false, lines: [{ accountId: A['6400'], amount: 40000 }] });
+// Tanggal jatuh tempo relatif terhadap hari ini: bucket aging bergantung pada selisih hari, jadi tanggal tetap
+// membuat tes ini rusak diam-diam begitu hari berganti (C pernah "88 hari telat", lalu 94 dan pindah ke 90+).
+const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+const billC = await mkBill({ supplierInvoiceNumber: 'INV-C', billDate: daysAgo(102), dueDate: daysAgo(88), applyTax: false, lines: [{ accountId: A['6400'], amount: 250000 }] });
+const billD = await mkBill({ supplierInvoiceNumber: 'INV-D', billDate: daysAgo(31), dueDate: daysAgo(21), applyTax: false, lines: [{ accountId: A['6400'], amount: 100000 }] });
+const billE = await call(T, 'POST', '/payables/bills', { supplierId: 's-nb-3', supplierInvoiceNumber: 'INV-E', billDate: TODAY, applyTax: false, lines: [{ accountId: A['6400'], amount: 40000 }] });
 check('bill C/D/E dibuat', billC.status === 201 && billD.status === 201 && billE.status === 201, `${billC.status}/${billD.status}/${billE.status}`);
 {
   const ag = (await call(T, 'GET', '/payables/aging')).body;

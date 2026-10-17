@@ -1,0 +1,27 @@
+# Jangan pernah masuk ke image: rahasia lokal dan hasil build yang akan dibuat ulang di dalam image.
+.git
+.env
+.env.*
+!.env.example
+server/.env
+server/.env.*
+!server/.env.example
+
+node_modules
+server/node_modules
+dist
+server/dist
+*.tsbuildinfo
+
+# Bukan bagian aplikasi
+brag-output
+reference
+preview.log
+*.log
+sample_*.csv
+sample_*.xlsx
+*.md
+!server/prisma/**/*.md
+
+# Pengujian (tidak dijalankan di image produksi)
+server/test
