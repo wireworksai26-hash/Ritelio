@@ -13,6 +13,7 @@ import { roundMoney } from '../../common/utils/money';
 import { JournalService } from '../accounting/journal.service';
 import { ReceivablesService } from '../receivables/receivables.service';
 import type { CreateTransactionDto, SyncResultItem } from './dto/transaction.dto';
+import { isStockTracked, stockedQtyByProduct } from './stock-lines';
 
 // Batas atas harga per item — mencegah overflow Decimal(14,2) dari klien.
 const MAX_ITEM_PRICE = 1_000_000_000;
@@ -132,6 +133,7 @@ export class SalesService {
     }
     const cogs = roundMoney(
       items.reduce((s, i) => {
+        if (!isStockTracked(productMap.get(i.productId)?.productType)) return s; // jasa: tidak ada HPP persediaan
         const unit =
           stockCost.get(i.productId) ?? Number(productMap.get(i.productId)?.costPrice ?? 0);
         return s + i.qty * unit;
@@ -144,10 +146,7 @@ export class SalesService {
       conflictReason = 'Ada produk yang tidak ditemukan di katalog tenant ini.';
     } else if (warehouseId) {
       // Gabungkan item duplikat per produk agar checksumming tidak salah pada self-conflict.
-      const needed = new Map<string, number>();
-      for (const item of items) {
-        needed.set(item.productId, (needed.get(item.productId) ?? 0) + item.qty);
-      }
+      const needed = stockedQtyByProduct(items, (id) => productMap.get(id)?.productType);
       for (const [productId, totalQty] of needed) {
         const stock = await this.prisma.inventoryStock.findUnique({
           where: { tenantId_companyId_productId_warehouseId: { tenantId, companyId, productId, warehouseId } },
@@ -246,10 +245,7 @@ export class SalesService {
         // Dekrement stok kondisional di dalam transaksi yang sama. updateMany
         // dengan filter quantity >= pivot menjamin race antar transaksi tidak dapat
         // menyebabkan oversell.
-        const needed = new Map<string, number>();
-        for (const item of items) {
-          needed.set(item.productId, (needed.get(item.productId) ?? 0) + item.qty);
-        }
+        const needed = stockedQtyByProduct(items, (id) => productMap.get(id)?.productType);
         for (const [productId, totalQty] of needed) {
           const updated = await trx.inventoryStock.updateMany({
             where: {

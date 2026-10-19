@@ -11,6 +11,7 @@ import { roundMoney } from '../../common/utils/money';
 import { JournalService } from '../accounting/journal.service';
 import { isUniqueViolation, retryOnConflict } from '../inventory/tx-retry';
 import { ReceivablesService } from '../receivables/receivables.service';
+import { isStockTracked } from '../sales/stock-lines';
 import type {
   ConvertQuotationDto,
   MoveOpportunityDto,
@@ -594,7 +595,7 @@ if (!quotation.customerId) throw new BadRequestException('Penawaran tidak punya 
     const order = await this.prisma.salesOrder.findFirst({
       where: { id, tenantId, companyId },
       include: {
-        lines: { include: { product: { select: { id: true, name: true } } } },
+        lines: { include: { product: { select: { id: true, name: true, productType: true } } } },
         customer: true,
       },
     });
@@ -626,6 +627,8 @@ if (!quotation.customerId) throw new BadRequestException('Penawaran tidak punya 
         const costByProduct = new Map<string, number>();
 
         for (const line of order.lines) {
+          // Jasa tidak punya stok: tidak dicek, tidak dikurangi, tanpa HPP persediaan.
+          if (!isStockTracked(line.product.productType)) continue;
           const stock = await tx.inventoryStock.findUnique({
             where: {
               tenantId_companyId_productId_warehouseId: {
