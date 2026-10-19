@@ -14,7 +14,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
     "postinstall": "prisma generate",
-    "start:prod": "prisma migrate deploy && node dist/main.js",
+    "start:prod": "prisma migrate deploy && node dist/seed/boot-seed.js && node dist/main.js",
     "seed:businesses": "ts-node --transpile-only src/seed/seed-businesses.ts",
     "seed:businesses:prod": "node dist/seed/seed-businesses.js",
     "seed:credentials": "ts-node --transpile-only src/seed/print-credentials.ts",

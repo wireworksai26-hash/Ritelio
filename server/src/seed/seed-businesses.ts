@@ -332,7 +332,22 @@ function printSummary(rows: AccountRow[], secret: string, generated: boolean): v
   log('\nCatat kata sandi dengan aman lalu hapus tampilan ini dari log/terminal. Ganti kata sandi setelah login pertama.');
 }
 
-async function main(): Promise<void> {
+export interface SeedBusinessesOptions {
+  /** true = cetak tabel akun beserta kata sandi (CLI). false = hanya hitungan, tanpa kata sandi (log server). */
+  printPasswords: boolean;
+}
+
+/** Ringkasan tanpa kata sandi, aman untuk log yang terlihat oleh banyak orang. */
+function printCounts(rows: AccountRow[]): void {
+  const count = (status: AccountRow['status']) => rows.filter((r) => r.status === status).length;
+  log(`Akun contoh: ${rows.length} (baru ${count('baru')}, sudah ada ${count('sudah ada')}, diatur ulang ${count('diatur ulang')}).`);
+  if (rows.some((r) => r.status === 'sudah ada, sandi BERBEDA')) {
+    log('Sebagian akun sudah ada dengan kata sandi berbeda; jalankan dengan SEED_RESET_PASSWORDS=yes bila ingin menyamakan.');
+  }
+  log('Kata sandi tidak dicetak. Dapatkan dengan: SEED_MASTER_SECRET=... npm run seed:credentials');
+}
+
+export async function seedBusinesses(opts: SeedBusinessesOptions): Promise<void> {
   const { secret, generated } = resolveMasterSecret(process.env);
   const reset = process.env.SEED_RESET_PASSWORDS === 'yes';
 
@@ -371,15 +386,18 @@ async function main(): Promise<void> {
       });
     }
 
-    printSummary(rows, secret, generated);
+    if (opts.printPasswords) printSummary(rows, secret, generated);
+    else printCounts(rows);
   } finally {
     await app.close();
   }
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error('\nSeed gagal:', err instanceof Error ? err.message : err);
-    process.exit(1);
-  });
+if (require.main === module) {
+  seedBusinesses({ printPasswords: true })
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error('Seed gagal:', err instanceof Error ? err.message : err);
+      process.exit(1);
+    });
+}

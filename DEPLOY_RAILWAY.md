@@ -109,6 +109,23 @@ Database Railway kosong. Ada tiga cara mengisinya, dari yang paling aman:
 
 ### 1. Tiga usaha contoh lengkap (tidak menghapus apa pun, aman diulang)
 
+**Cara termudah, dari Railway saja (tanpa komputer, tanpa CLI):** di service aplikasi, buka **Variables**
+dan tambahkan dua variabel, lalu **Redeploy**.
+
+| Variabel | Nilai |
+|---|---|
+| `SEED_BUSINESSES_ON_BOOT` | `yes` |
+| `SEED_MASTER_SECRET` | kunci induk buatan Anda, minimal 16 karakter (simpan di tempat aman) |
+
+Saat service start, akun dan data tiga usaha dibuat otomatis. Cek **Deploy Logs**: harus ada
+`[boot-seed] selesai`. Kata sandi sengaja **tidak** dicetak ke log (log terlihat oleh anggota project); cetak
+tabelnya di komputer dengan `SEED_MASTER_SECRET="..." npm run seed:credentials`. Seed aman diulang, tetapi
+menambah beberapa detik pada tiap start, jadi **hapus `SEED_BUSINESSES_ON_BOOT` setelah akun terbentuk**.
+Bila kunci induk kosong atau kurang dari 16 karakter, seed dilewati dengan peringatan di log dan server tetap
+menyala.
+
+Alternatif dari komputer:
+
 Membuat **Kopi Senja** (retail/kafe), **Roti Nusantara** (manufaktur/bakery), dan **Laundry Segar Jaya**
 (jasa). Tiap usaha punya 5 akun (owner, admin, manager, kasir, staf gudang), 2 outlet, katalog dengan
 barcode dan stok awal, pemasok, pelanggan, dan karyawan. Roti Nusantara juga punya work center dan BOM.
