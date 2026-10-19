@@ -17,7 +17,9 @@
     "start:prod": "prisma migrate deploy && node dist/main.js",
     "seed:businesses": "ts-node --transpile-only src/seed/seed-businesses.ts",
     "seed:businesses:prod": "node dist/seed/seed-businesses.js",
-    "seed:credentials": "ts-node --transpile-only src/seed/print-credentials.ts"
+    "seed:credentials": "ts-node --transpile-only src/seed/print-credentials.ts",
+    "seed:demo": "ts-node --transpile-only src/seed/seed-demo.ts",
+    "seed:demo:prod": "node dist/seed/seed-demo.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",
