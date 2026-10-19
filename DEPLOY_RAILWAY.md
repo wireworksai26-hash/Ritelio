@@ -105,22 +105,48 @@ Buka aplikasi, tekan **F12** → tab **Network**, muat ulang, klik permintaan ya
 
 ## Akun pertama
 
-Database Railway kosong, dan **seed sengaja menolak jalan di production** karena ia menghapus data.
+Database Railway kosong. Ada tiga cara mengisinya, dari yang paling aman:
 
-- **Akun usaha (disarankan):** buka aplikasi → **Coba Gratis** (`/onboarding`). Ini membuat bisnis baru
-  beserta akun owner dengan data Anda sendiri.
-- **Data demo + superadmin (hanya untuk database kosong yang boleh dihapus):** jalankan seed sekali dari
-  komputer Anda terhadap database Railway:
+### 1. Tiga usaha contoh lengkap (tidak menghapus apa pun, aman diulang)
 
-  ```
-  cd server
-  DATABASE_URL="<DATABASE_PUBLIC_URL dari plugin Postgres>" \
-  NODE_ENV=production ALLOW_DESTRUCTIVE_SEED=yes \
-  SEED_ADMIN_PASSWORD="<sandi kuat ≥ 12 karakter>" npm run seed
-  ```
+Membuat **Kopi Senja** (retail/kafe), **Roti Nusantara** (manufaktur/bakery), dan **Laundry Segar Jaya**
+(jasa). Tiap usaha punya 5 akun (owner, admin, manager, kasir, staf gudang), 2 outlet, katalog dengan
+barcode dan stok awal, pemasok, pelanggan, dan karyawan. Roti Nusantara juga punya work center dan BOM.
+Stok awal ikut terjurnal di buku besar.
 
-  Seed ini **menghapus seluruh data** di database itu. Jangan dijalankan setelah ada data asli.
-  Password `admin123` / `ferry123` hanya berlaku di mode pengembangan lokal.
+Kata sandi semua akun diturunkan dari **satu kunci induk** (`SEED_MASTER_SECRET`, minimal 16 karakter),
+jadi tidak ada kata sandi yang tersimpan di repo dan seed yang diulang menghasilkan kata sandi yang sama.
+Simpan kunci induk di tempat aman.
+
+```
+cd server
+npm install
+# server/.env harus ada (salin dari .env.example); yang dipakai hanya JWT_* untuk validasi konfigurasi
+DATABASE_URL="<DATABASE_PUBLIC_URL dari plugin Postgres>" SEED_MASTER_SECRET="<kunci induk, min. 16 karakter>" npm run seed:businesses
+```
+
+- Database harus sudah bermigrasi (service Railway menjalankannya otomatis saat start).
+- Seed mencetak tabel akun satu kali. Untuk mencetak ulang kapan saja, tanpa database:
+  `SEED_MASTER_SECRET="..." npm run seed:credentials`
+- Diulang aman: data yang sudah ada dilewati, bukan digandakan.
+- Mengatur ulang kata sandi akun yang sudah ada: tambahkan `SEED_RESET_PASSWORDS=yes`.
+- Di dalam container Railway (bila memakai Railway CLI): isi `SEED_MASTER_SECRET` di Variables lalu
+  jalankan `npm run seed:businesses:prod`.
+- Email akun memakai domain `.test` (dicadangkan RFC, tidak pernah ada di internet), mis.
+  `owner@kopisenja.test`. Akun `superadmin@retalio.id` ikut dibuat dan dilekatkan ke usaha pertama.
+
+### 2. Akun usaha Anda sendiri
+Buka aplikasi, **Coba Gratis** (`/onboarding`). Ini membuat bisnis baru beserta akun owner di server.
+
+### 3. Seed lama (data demo Newsem Bakery dan Kopi Kelana)
+Hanya untuk database kosong yang boleh dihapus, karena **menghapus seluruh data**:
+
+```
+cd server
+DATABASE_URL="<DATABASE_PUBLIC_URL>" NODE_ENV=production ALLOW_DESTRUCTIVE_SEED=yes SEED_ADMIN_PASSWORD="<sandi kuat >= 12 karakter>" npm run seed
+```
+
+Password `admin123` / `ferry123` hanya berlaku di mode pengembangan lokal.
 
 ## Checklist (opsi A)
 

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma.service';
 import { LEDGER_STATUSES } from '../accounting/ledger';
+import { effectiveMinThreshold, isAtOrBelowThreshold } from '../inventory/stock-threshold';
 import { KNOWLEDGE_BASE, KB_FALLBACK } from './knowledge-base';
 import type { FastIntent } from './ai-router.service';
 
@@ -129,16 +130,16 @@ export class FastPathService {
   private async lowStock(tenantId: string): Promise<FastAnswer> {
     const stocks = await this.prisma.inventoryStock.findMany({
       where: { tenantId },
-      include: { product: { select: { name: true, unit: true } }, warehouse: { select: { name: true } } },
+      include: { product: { select: { name: true, unit: true, reorderPoint: true } }, warehouse: { select: { name: true } } },
     });
     const low = stocks
-      .filter((s) => Number(s.quantity) <= Number(s.minThreshold))
+      .filter((s) => isAtOrBelowThreshold(s))
       .sort((a, b) => Number(a.quantity) - Number(b.quantity));
     if (low.length === 0) {
       return { answer: 'Semua stok berada di atas ambang minimum saat ini.', refs: ['inventory_stock:threshold'] };
     }
     const lines = low.map(
-      (s) => `• ${s.product.name} — sisa ${Number(s.quantity)} ${s.product.unit} di ${s.warehouse.name} (ambang ${Number(s.minThreshold)})`,
+      (s) => `• ${s.product.name} — sisa ${Number(s.quantity)} ${s.product.unit} di ${s.warehouse.name} (ambang ${effectiveMinThreshold(s)})`,
     );
     return {
       answer: `Ada ${low.length} produk di bawah ambang minimum:\n${lines.join('\n')}\n\nPertimbangkan membuat Purchase Order untuk item teratas sebelum akhir pekan.`,
@@ -333,9 +334,9 @@ export class FastPathService {
 
     const stocks = await this.prisma.inventoryStock.findMany({
       where: { tenantId },
-      include: { product: { select: { name: true } } },
+      include: { product: { select: { name: true, reorderPoint: true } } },
     });
-    const low = stocks.filter((s) => Number(s.quantity) <= Number(s.minThreshold));
+    const low = stocks.filter((s) => isAtOrBelowThreshold(s));
     // Anomali budding dari insight AI, bukan lagi flag pada baris legacy.
     const anomalies = await this.prisma.aiInsightLog.count({
       where: { tenantId, module: 'finance', insightType: 'anomaly' },

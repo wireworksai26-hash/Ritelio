@@ -1,3 +1,4 @@
+import { effectiveMinThreshold, isAtOrBelowThreshold } from './stock-threshold';
 import {
   BadRequestException,
   ConflictException,
@@ -455,12 +456,16 @@ export class InventoryService {
       take: 1000,
       where: { tenantId, companyId, ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}) },
       include: {
-        product: { select: { id: true, name: true, sku: true, unit: true, sellPrice: true } },
+        product: { select: { id: true, name: true, sku: true, unit: true, sellPrice: true, reorderPoint: true } },
         warehouse: true,
       },
     });
-    // Flag low: stok di bawah/ sama dengan ambang minimum
-    return rows.map((s) => ({ ...s, low: Number(s.quantity) <= Number(s.minThreshold) }));
+    // Flag low: stok di bawah/sama dengan ambang efektif. minThreshold yang dikirim ke klien juga ambang
+    // efektif, supaya lencana dan notifikasi di UI konsisten dengan daftar stok menipis.
+    return rows.map((s) => {
+      const minThreshold = effectiveMinThreshold(s);
+      return { ...s, minThreshold, low: Number(s.quantity) <= minThreshold };
+    });
   }
 
   async lowStock(tenantId: string) {
@@ -472,7 +477,7 @@ export class InventoryService {
       include: { product: true, warehouse: true },
     });
     return rows
-      .filter((s) => Number(s.quantity) <= Number(s.minThreshold))
+      .filter((s) => isAtOrBelowThreshold(s))
       .sort((a, b) => Number(a.quantity) - Number(b.quantity));
   }
 

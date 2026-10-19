@@ -1,3 +1,4 @@
+import { effectiveMinThreshold } from '../inventory/stock-threshold';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma.service';
 import { FxService } from '../finance/fx.service';
@@ -82,7 +83,7 @@ export class DashboardService {
         }),
         this.prisma.inventoryStock.findMany({
           where: { tenantId, companyId },
-          select: { quantity: true, minThreshold: true, product: { select: { sku: true, name: true } } },
+          select: { quantity: true, minThreshold: true, product: { select: { sku: true, name: true, reorderPoint: true } } },
         }),
         this.prisma.vendorBill.findMany({
           where: { tenantId, companyId, status: { in: ['open', 'partial'] } },
@@ -152,12 +153,12 @@ export class DashboardService {
       .slice(0, 10);
 
     const lowStockList = lowStock
-      .filter((s) => Number(s.minThreshold) > 0 && Number(s.quantity) <= Number(s.minThreshold))
+      .filter((s) => effectiveMinThreshold(s) > 0 && Number(s.quantity) <= effectiveMinThreshold(s))
       .map((s) => ({
         sku: s.product.sku,
         name: s.product.name,
         onHand: Number(s.quantity),
-        minThreshold: Number(s.minThreshold),
+        minThreshold: effectiveMinThreshold(s),
       }))
       .slice(0, 10);
 
