@@ -234,7 +234,7 @@ export default function Login() {
               </ul>
             </Reveal>
           </div>
-          <p className="text-caption text-fossil">© 2026 Retalio · Usaha: <strong className="text-ink">{businessTenant.name}</strong></p>
+          <p className="text-caption text-fossil">© 2026 Retalio</p>
         </aside>
 
         {/* Kolom kanan — form login */}
@@ -253,17 +253,13 @@ export default function Login() {
             <Card className="rounded-2xl w-full p-6 sm:p-8 shadow-sm">
               <div className="lg:hidden mb-6 flex items-center justify-between">
                 <Logo compact />
-                <Badge variant="outline">{businessTenant.name}</Badge>
               </div>
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-heading-sm font-semibold text-ink">Masuk ke Retalio</h2>
-                  <p className="text-caption text-fossil mt-1">
-                    Portal Owner, Manager, Kasir, &amp; Tim Usaha
-                  </p>
-                </div>
-                <Badge variant="ink" className="hidden sm:inline-flex">{businessTenant.name}</Badge>
+              <div>
+                <h2 className="text-heading-sm font-semibold text-ink">Masuk ke Retalio</h2>
+                <p className="text-caption text-fossil mt-1">
+                  Portal Owner, Manager, Kasir, &amp; Tim Usaha
+                </p>
               </div>
 
               {/* Rate Limit Alert */}
