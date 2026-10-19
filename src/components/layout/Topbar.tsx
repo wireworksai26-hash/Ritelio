@@ -116,8 +116,29 @@ export function Topbar() {
         </NavLink>
 
         {user.role === 'superadmin' ? (
-          <div className="shrink-0 flex items-center gap-1.5">
-            <Badge variant="ink">Superadmin Institusi</Badge>
+          <div className="shrink-0 flex items-center gap-2">
+            <Badge variant="ink">Superadmin</Badge>
+            <div className="relative">
+              <select
+                value={tenant.id}
+                onChange={(e) => {
+                  useBusinessStore.getState().switchActiveTenant(e.target.value);
+                }}
+                aria-label="Pilih tenant aktif untuk inspeksi"
+                className="appearance-none bg-paper/70 border border-ash rounded-lg pl-2.5 pr-7 py-1.5 text-caption sm:text-body-sm text-ink hover:border-pebble focus:border-ink focus:outline-none cursor-pointer max-w-[160px] sm:max-w-[220px] truncate"
+              >
+                {useBusinessStore.getState().allTenants.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    Tenant: {t.name}
+                  </option>
+                ))}
+              </select>
+              <Icon
+                name="chevron-down"
+                size={13}
+                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-fossil"
+              />
+            </div>
           </div>
         ) : user.role === 'cashier' ? (
           <div className="shrink-0 flex items-center gap-1.5">

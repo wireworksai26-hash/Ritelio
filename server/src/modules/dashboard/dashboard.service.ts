@@ -7,6 +7,7 @@ import { roundMoney } from '../../common/utils/money';
 import { LEDGER_STATUSES } from '../accounting/ledger';
 import { outstandingOf } from '../finance/document-amounts';
 import { openingRowsWithoutJournal } from '../finance/opening-balances';
+import { rankTopItems } from './top-products';
 
 export interface DashboardSnapshot {
   periodDays: number;
@@ -76,10 +77,9 @@ export class DashboardService {
           },
           select: { total: true, clientTimestamp: true },
         }),
-        this.prisma.salesTransactionItem.groupBy({
-          by: ['productId'],
+        this.prisma.salesTransactionItem.findMany({
           where: { transaction: { tenantId, companyId, syncStatus: 'synced', clientTimestamp: { gte: since } } },
-          _sum: { qty: true, price: true },
+          select: { productId: true, qty: true, price: true },
         }),
         this.prisma.inventoryStock.findMany({
           where: { tenantId, companyId },
@@ -130,7 +130,8 @@ export class DashboardService {
       .map(([date, v]) => ({ date, revenue: roundMoney(v.revenue), transactions: v.transactions }))
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    const productIds = topItems.map((i) => i.productId);
+    const rankedItems = rankTopItems(topItems);
+    const productIds = rankedItems.map((i) => i.productId);
     const products = productIds.length
       ? await this.prisma.product.findMany({
           where: { id: { in: productIds } },
@@ -138,19 +139,10 @@ export class DashboardService {
         })
       : [];
     const productMap = new Map(products.map((p) => [p.id, p]));
-    const topProducts = topItems
-      .map((i) => {
-        const p = productMap.get(i.productId);
-        const qty = Number(i._sum.qty ?? 0);
-        return {
-          sku: p?.sku ?? i.productId,
-          name: p?.name ?? '-',
-          qty,
-          revenue: roundMoney(qty * Number(i._sum.price ?? 0)),
-        };
-      })
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 10);
+    const topProducts = rankedItems.map((i) => {
+      const p = productMap.get(i.productId);
+      return { sku: p?.sku ?? i.productId, name: p?.name ?? '-', qty: i.qty, revenue: i.revenue };
+    });
 
     const lowStockList = lowStock
       .filter((s) => effectiveMinThreshold(s) > 0 && Number(s.quantity) <= effectiveMinThreshold(s))
@@ -202,6 +194,12 @@ openPayables: roundMoney(toReporting(bills.reduce((sum, b) => sum + outstandingO
       where: { tenantId, companyId },
       select: { id: true, code: true, type: true },
     });
+    // Rekening bank aktif selain akun 1000 juga kas; tanpa ini saldo bank lain lenyap dari kartu Kas.
+    const bankLedgerIds = new Set(
+      (await this.prisma.bankAccount.findMany({ where: { tenantId, companyId, isActive: true }, select: { accountId: true } })).map(
+        (b) => b.accountId,
+      ),
+    );
     const debit = new Map<string, number>();
     const credit = new Map<string, number>();
     for (const r of [...rows, ...openings]) {
@@ -224,10 +222,11 @@ openPayables: roundMoney(toReporting(bills.reduce((sum, b) => sum + outstandingO
       else if (a.type === 'liability') liabilities += -net;
       else if (a.type === 'equity') equityBook += -net;
 
-      if (a.type === 'asset' && /^1\d+$/.test(a.code)) {
-        if (a.code === CASH_CODE) cash += net;
-        else if (/^11/.test(a.code)) inventory += net;
-        else receivable += net;
+      if (a.type === 'asset') {
+        const bucket = classifyAssetAccount(a.code, bankLedgerIds.has(a.id));
+        if (bucket === 'cash') cash += net;
+        else if (bucket === 'inventory') inventory += net;
+        else if (bucket === 'receivable') receivable += net;
       }
       if (a.type === 'liability') payable += -net;
     }
@@ -253,3 +252,16 @@ openPayables: roundMoney(toReporting(bills.reduce((sum, b) => sum + outstandingO
 }
 
 const CASH_CODE = '1000';
+
+/**
+ * Kelompok akun aset untuk kartu dashboard: kas (1000 dan rekening bank), persediaan (11xx), piutang (12xx).
+ * Akun lain (aset tetap 13xx, akumulasi penyusutan 1390, dst.) tidak masuk kelompok mana pun; dulu semuanya
+ * ikut terhitung sebagai piutang begitu modul aset tetap dipakai.
+ */
+export function classifyAssetAccount(code: string, isBankLedger: boolean): 'cash' | 'inventory' | 'receivable' | null {
+  if (!/^1\d+$/.test(code)) return null;
+  if (code === CASH_CODE || isBankLedger) return 'cash';
+  if (/^11/.test(code)) return 'inventory';
+  if (/^12/.test(code)) return 'receivable';
+  return null;
+}

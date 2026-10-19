@@ -12,6 +12,7 @@ import { roundMoney } from '../../common/utils/money';
 import { JournalService } from '../accounting/journal.service';
 import { ApprovalService } from '../approvals/approval.service';
 import { ReceivablesService } from '../receivables/receivables.service';
+import { ensureAccount, type AccountSpec } from '../inventory/inventory-adjustment';
 import { advisoryLock, isUniqueViolation } from '../inventory/tx-retry';
 import { claimShipmentStatus, type ShipmentStatusValue } from './shipment-status';
 import type {
@@ -26,7 +27,8 @@ import type {
 
 const REVENUE_ACCOUNT = '4000';
 const CASH_ACCOUNT = '1000';
-const MAINTENANCE_EXPENSE = '6400';
+// COA bawaan pendaftaran tenant tidak memuat akun ini, jadi dibuat saat pertama dibutuhkan.
+const MAINTENANCE_EXPENSE: AccountSpec = { code: '6400', name: 'Beban Pemeliharaan', type: 'expense' };
 const RECEIVABLE_ACCOUNT = '1200';
 
 @Injectable()
@@ -845,7 +847,7 @@ private readonly prisma: PrismaService,
 
       if (total > 0) {
         const [expenseAccount, cashAccount] = await Promise.all([
-          this.accountIn(tx, tenantId, companyId, MAINTENANCE_EXPENSE, 'Beban Pemeliharaan'),
+          ensureAccount(tx, tenantId, companyId, MAINTENANCE_EXPENSE),
           this.accountIn(tx, tenantId, companyId, CASH_ACCOUNT, 'Kas'),
         ]);
         await this.journals.post(tx, {

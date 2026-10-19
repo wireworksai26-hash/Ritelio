@@ -98,7 +98,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'fonts/*.woff2'],
+      includeAssets: ['favicon.svg', 'fonts/*.woff2', 'OneSignalSDKWorker.js', 'OneSignalSDKUpdaterWorker.js'],
       manifest: {
         name: 'Retalio ERP',
         short_name: 'Retalio',
@@ -122,7 +122,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,woff2,png}'],
         navigateFallback: 'index.html',
         // Navigasi ke API (mis. membuka /v1/health di tab browser) tidak boleh dijawab index.html oleh SW.
-        navigateFallbackDenylist: [/^\/v1\//, /^\/api-sync\//],
+        navigateFallbackDenylist: [/^\/v1\//, /^\/api-sync\//, /^\/OneSignalSDK/],
         // Sengaja TANPA runtimeCaching untuk API:
         // - Cache SW berkunci URL, bukan pengguna. Respons ber-token yang di-cache bisa terbaca pengguna lain
         //   di perangkat bersama (tablet kasir) saat offline.

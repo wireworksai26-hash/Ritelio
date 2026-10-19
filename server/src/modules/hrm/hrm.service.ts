@@ -32,11 +32,12 @@ import {
   workingDaysInYear,
 } from './work-time';
 
-const SALARY_ACCOUNT = '6300';
+// COA bawaan pendaftaran tenant tidak memuat akun-akun ini, jadi semuanya dibuat saat dibutuhkan (seperti Utang Gaji).
+const SALARY_ACCOUNT: AccountSpec = { code: '6300', name: 'Beban Gaji', type: 'expense' };
 // Utang PPh 21 =liability. Jangan tertukar dengan 2150 (Piutang PPN) yang
 // bertipe aset — memakai nomor yang salah membuat jurnal tidak seimbang.
-const PPH21_PAYABLE = '2160';
-const SOCIAL_PAYABLE = '2200';
+const PPH21_PAYABLE: AccountSpec = { code: '2160', name: 'Utang PPh 21', type: 'liability' };
+const SOCIAL_PAYABLE: AccountSpec = { code: '2200', name: 'Utang BPJS', type: 'liability' };
 /** Kewajiban gaji ke karyawan; COA seed tidak punya akun ini, jadi dibuat saat dibutuhkan. */
 const WAGES_PAYABLE_ACCOUNT: AccountSpec = { code: '2300', name: 'Utang Gaji', type: 'liability' };
 
@@ -732,9 +733,9 @@ const brackets = await this.bracketsFor(tenantId, companyId, 'withholding', dto.
       if (claimed.count !== 1) throw new ConflictException('Payroll sudah diposting oleh permintaan lain.');
 
       const [salaryAcc, pphAcc, socialAcc, wagesPayableAcc] = await Promise.all([
-        this.accountIn(tx, tenantId, companyId, SALARY_ACCOUNT, 'Beban Gaji'),
-        this.accountIn(tx, tenantId, companyId, PPH21_PAYABLE, 'Utang PPh 21'),
-        this.accountIn(tx, tenantId, companyId, SOCIAL_PAYABLE, 'Utang BPJS'),
+        ensureAccount(tx, tenantId, companyId, SALARY_ACCOUNT),
+        ensureAccount(tx, tenantId, companyId, PPH21_PAYABLE),
+        ensureAccount(tx, tenantId, companyId, SOCIAL_PAYABLE),
         ensureAccount(tx, tenantId, companyId, WAGES_PAYABLE_ACCOUNT),
       ]);
 

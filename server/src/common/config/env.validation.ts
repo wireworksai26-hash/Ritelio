@@ -95,6 +95,11 @@ export function validateConfig(config: EnvConfig): EnvConfig {
     errors.push('DATABASE_URL harus berupa URL PostgreSQL');
   }
 
+  const oneSignalAppId = config.ONESIGNAL_APP_ID?.trim();
+  if (oneSignalAppId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(oneSignalAppId)) {
+    errors.push('ONESIGNAL_APP_ID harus berformat UUID standar (mis. xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)');
+  }
+
   if (errors.length > 0) {
     throw new Error(`Konfigurasi environment tidak valid:\n- ${errors.join('\n- ')}`);
   }

@@ -7,10 +7,10 @@ export const OUTLET_SHARES: Record<string, number[]> = {
   laundrysegar: [0.6, 0.4],
 };
 
-/** Penjualan POS memakai paling banyak porsi ini dari stok tiap outlet; sisanya untuk pesanan/kredit B2B. */
-export const POS_STOCK_FRACTION = 0.45;
-/** Pesanan dan penjualan kredit B2B memakai paling banyak porsi ini dari stok outlet pertama. */
-export const B2B_STOCK_FRACTION = 0.22;
+/** Penjualan POS memakai paling banyak porsi ini dari stok tiap outlet. */
+export const POS_STOCK_FRACTION = 0.68;
+/** Pesanan penjualan dan penjualan kredit B2B memakai paling banyak porsi ini dari stok outlet pertama. */
+export const B2B_STOCK_FRACTION = 0.27;
 
 const flat = (n: number, v = 0): number[] => Array.from({ length: n }, () => v);
 const hoursOf = (map: Record<number, number>): number[] => {
@@ -19,10 +19,12 @@ const hoursOf = (map: Record<number, number>): number[] => {
   return arr;
 };
 
+// Volume dasar sengaja di atas kapasitas stok awal: rencana lalu dipangkas merata sesuai stok yang ada
+// (lihat planPosSales). Bila domain 'supply' menambah stok, penjualan ikut naik sampai volume dasar ini.
 const KOPI_SENJA: PosProfile = {
   businessKey: 'kopisenja',
-  count: 150,
-  days: 58,
+  baseDaily: 14,
+  days: 75,
   hours: hoursOf({ 7: 6, 8: 10, 9: 8, 10: 5, 11: 5, 12: 9, 13: 8, 14: 5, 15: 5, 16: 7, 17: 9, 18: 8, 19: 6, 20: 4, 21: 2 }),
   dow: [1.5, 0.85, 0.85, 0.9, 0.95, 1.15, 1.55],
   growth: 0.35,
@@ -32,11 +34,14 @@ const KOPI_SENJA: PosProfile = {
   cashier: [['cashier', 85], ['manager', 15]],
   memberRate: 0.06,
   members: ['Budi Hartono (member)'],
+  memberDiscountPct: 5,
+  promoRate: 0.08,
+  promoPcts: [10, 15],
   catalog: [
     { sku: 'KS-001', weight: 10, qty: [[1, 70], [2, 30]] },
     { sku: 'KS-002', weight: 14, qty: [[1, 75], [2, 25]] },
     { sku: 'KS-003', weight: 14, qty: [[1, 75], [2, 25]] },
-    { sku: 'KS-004', weight: 20, qty: [[1, 60], [2, 30], [3, 10]] },
+    { sku: 'KS-004', weight: 22, qty: [[1, 60], [2, 30], [3, 10]] },
     { sku: 'KS-005', weight: 10, qty: [[1, 80], [2, 20]] },
     { sku: 'KS-006', weight: 7, qty: [[1, 85], [2, 15]] },
     { sku: 'KS-007', weight: 6, qty: [[1, 85], [2, 15]] },
@@ -48,19 +53,24 @@ const KOPI_SENJA: PosProfile = {
   ],
 };
 
+// Toko roti: pelanggan eceran pagi dan sore, sebagian besar satu jenis roti per struk.
 const ROTI_NUSANTARA: PosProfile = {
   businessKey: 'rotinusantara',
-  count: 60,
-  days: 45,
-  hours: hoursOf({ 6: 6, 7: 12, 8: 10, 9: 6, 10: 4, 11: 4, 12: 5, 13: 4, 14: 4, 15: 8, 16: 10, 17: 9, 18: 5, 19: 2 }),
+  baseDaily: 12,
+  days: 70,
+  // jam 07 WIB paling pagi: sebelum itu tanggal UTC (dipakai grafik harian dan tile "hari ini") masih hari kemarin
+  hours: hoursOf({ 7: 18, 8: 10, 9: 6, 10: 4, 11: 4, 12: 5, 13: 4, 14: 4, 15: 8, 16: 10, 17: 9, 18: 5, 19: 2 }),
   dow: [1.3, 0.9, 0.85, 0.9, 0.95, 1.1, 1.4],
   growth: 0.25,
   outletWeights: [0.65, 0.35],
-  lineWeights: [0.86, 0.14],
+  lineWeights: [0.6, 0.3, 0.1],
   payment: [['cash', 42], ['qris', 36], ['debit', 14], ['transfer', 8]],
   cashier: [['cashier', 85], ['manager', 15]],
   memberRate: 0,
   members: [],
+  memberDiscountPct: 0,
+  promoRate: 0.07,
+  promoPcts: [10, 20],
   catalog: [
     { sku: 'RN-001', weight: 18, qty: [[1, 85], [2, 15]] },
     { sku: 'RN-002', weight: 13, qty: [[1, 80], [2, 20]] },
@@ -70,10 +80,11 @@ const ROTI_NUSANTARA: PosProfile = {
   ],
 };
 
+// Laundry: jasa kiloan tidak berstok, jadi tidak dibatasi stok; hanya perlengkapan (PL-*) yang berstok.
 const LAUNDRY_SEGAR: PosProfile = {
   businessKey: 'laundrysegar',
-  count: 80,
-  days: 55,
+  baseDaily: 13,
+  days: 75,
   hours: hoursOf({ 8: 8, 9: 10, 10: 9, 11: 6, 12: 4, 13: 4, 14: 5, 15: 6, 16: 9, 17: 10, 18: 8, 19: 4, 20: 2 }),
   dow: [0.9, 1.3, 1.0, 0.9, 0.9, 1.0, 1.3],
   growth: 0.2,
@@ -83,6 +94,9 @@ const LAUNDRY_SEGAR: PosProfile = {
   cashier: [['cashier', 85], ['manager', 15]],
   memberRate: 0.1,
   members: ['Dewi Kartika (member)'],
+  memberDiscountPct: 5,
+  promoRate: 0.06,
+  promoPcts: [10, 15],
   catalog: [
     { sku: 'LS-001', weight: 36, qty: [[2, 15], [2.5, 10], [3, 20], [3.5, 10], [4, 15], [5, 15], [6, 10], [8, 5]] },
     { sku: 'LS-002', weight: 20, qty: [[3, 25], [4, 25], [5, 25], [6, 15], [8, 10]] },

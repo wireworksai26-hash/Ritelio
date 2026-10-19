@@ -58,6 +58,48 @@ const defaultTenant: Tenant = {
 
 const defaultAllTenants: Tenant[] = [
   defaultTenant,
+  {
+    id: 'tenant-kopisenja',
+    name: 'Kopi Senja',
+    industry_template: 'retail',
+    subscription_plan: 'plus_ai',
+    status: 'active',
+    created_at: '2026-01-12T09:30:00Z',
+    monthly_revenue: 68500000,
+    outlets_count: 2,
+    users_count: 5,
+    ai_quota_used: 340,
+    ai_quota_limit: 1000,
+    settings: { currency: 'IDR', timezone: 'Asia/Jakarta' },
+  },
+  {
+    id: 'tenant-rotinusantara',
+    name: 'Roti Nusantara',
+    industry_template: 'manufacturing',
+    subscription_plan: 'custom',
+    status: 'active',
+    created_at: '2026-02-03T10:15:00Z',
+    monthly_revenue: 215000000,
+    outlets_count: 2,
+    users_count: 5,
+    ai_quota_used: 890,
+    ai_quota_limit: 5000,
+    settings: { currency: 'IDR', timezone: 'Asia/Jakarta' },
+  },
+  {
+    id: 'tenant-laundrysegar',
+    name: 'Laundry Segar Jaya',
+    industry_template: 'services',
+    subscription_plan: 'basic',
+    status: 'trial',
+    created_at: '2026-03-10T11:00:00Z',
+    monthly_revenue: 24800000,
+    outlets_count: 2,
+    users_count: 5,
+    ai_quota_used: 0,
+    ai_quota_limit: 0,
+    settings: { currency: 'IDR', timezone: 'Asia/Jakarta' },
+  },
 ];
 
 const defaultOutlets: Outlet[] = [
@@ -171,6 +213,63 @@ const defaultUsers: User[] = [
     is_active: true,
     last_login: new Date().toISOString(),
   },
+  {
+    id: 'u-kopisenja-owner',
+    tenant_id: 'tenant-kopisenja',
+    name: 'Rina Marlina (Owner Kopi Senja)',
+    email: 'owner@kopisenja.test',
+    password: 'admin123',
+    role: 'owner',
+    permissions: {
+      pos_access: true,
+      inventory_access: true,
+      finance_access: true,
+      discount_permission: true,
+      void_transaction: true,
+      export_data: true,
+      manage_products: true,
+    },
+    is_active: true,
+    last_login: new Date().toISOString(),
+  },
+  {
+    id: 'u-rotinusantara-owner',
+    tenant_id: 'tenant-rotinusantara',
+    name: 'Hendra Wijaya (Owner Roti Nusantara)',
+    email: 'owner@rotinusantara.test',
+    password: 'admin123',
+    role: 'owner',
+    permissions: {
+      pos_access: true,
+      inventory_access: true,
+      finance_access: true,
+      discount_permission: true,
+      void_transaction: true,
+      export_data: true,
+      manage_products: true,
+    },
+    is_active: true,
+    last_login: new Date().toISOString(),
+  },
+  {
+    id: 'u-laundrysegar-owner',
+    tenant_id: 'tenant-laundrysegar',
+    name: 'Siti Aminah (Owner Laundry Segar)',
+    email: 'owner@laundrysegar.test',
+    password: 'admin123',
+    role: 'owner',
+    permissions: {
+      pos_access: true,
+      inventory_access: true,
+      finance_access: true,
+      discount_permission: true,
+      void_transaction: true,
+      export_data: true,
+      manage_products: true,
+    },
+    is_active: true,
+    last_login: new Date().toISOString(),
+  },
 ];
 
 const defaultSuppliers: Supplier[] = [
@@ -269,6 +368,9 @@ interface BusinessState {
   registerBusiness: (data: OnboardingPayload) => { tenant: Tenant; outlet: Outlet; product: Product; ownerUser: User };
   resetToDemo: () => void;
   updateTenant: (updates: Partial<Tenant>) => void;
+  switchActiveTenant: (tenantId: string) => Tenant | null;
+  upsertTenantInList: (tenant: Tenant & { modules?: Record<string, boolean> }) => void;
+  deleteTenantFromList: (tenantId: string) => void;
   setSubscriptionPlan: (plan: SubscriptionPlan) => void;
   addOutlet: (outlet: Outlet) => void;
   addCategory: (category: ProductCategory) => void;
@@ -279,6 +381,7 @@ interface BusinessState {
   addFinancialEntry: (entry: FinancialEntry) => void;
   adjustStock: (productId: string, warehouseId: string, delta: number, reason: string) => void;
   addUser: (user: User) => void;
+  updateUserById: (userId: string, updates: Partial<User>) => void;
   updateUserPermissions: (userId: string, permissions: Record<string, boolean>) => void;
   updateUserRole: (userId: string, role: Role) => void;
   deleteUser: (userId: string) => void;
@@ -648,6 +751,44 @@ export const useBusinessStore = create<BusinessState>()(
         }));
       },
 
+      switchActiveTenant: (tenantId) => {
+        const state = get();
+        const found = state.allTenants.find((t) => t.id === tenantId);
+        if (!found) return null;
+        set({ tenant: found });
+        useModuleStore.getState().setTemplate(found.industry_template);
+        useModuleStore.getState().setModuleActive('assistant', found.subscription_plan !== 'basic');
+        broadcastStateChange('DATA_SYNC', { tenant: found });
+        return found;
+      },
+
+      upsertTenantInList: (tenant) => {
+        let payload: any = null;
+        set((state) => {
+          const exists = state.allTenants.some((t) => t.id === tenant.id);
+          const nextAll = exists
+            ? state.allTenants.map((t) => (t.id === tenant.id ? { ...t, ...tenant } : t))
+            : [tenant, ...state.allTenants];
+          const nextActive = state.tenant.id === tenant.id ? { ...state.tenant, ...tenant } : state.tenant;
+          payload = { allTenants: nextAll, tenant: nextActive };
+          return payload;
+        });
+        if (payload) broadcastStateChange('DATA_SYNC', payload);
+      },
+
+      deleteTenantFromList: (tenantId) => {
+        let payload: any = null;
+        set((state) => {
+          const remaining = state.allTenants.filter((t) => t.id !== tenantId);
+          if (remaining.length === 0) return state;
+          const nextActive = state.tenant.id === tenantId ? remaining[0] : state.tenant;
+          const nextUsers = state.users.filter((u) => u.tenant_id !== tenantId);
+          payload = { allTenants: remaining, tenant: nextActive, users: nextUsers };
+          return payload;
+        });
+        if (payload) broadcastStateChange('DATA_SYNC', payload);
+      },
+
       setSubscriptionPlan: (plan) => {
         set((state) => {
           const updatedTenant = {
@@ -952,6 +1093,18 @@ export const useBusinessStore = create<BusinessState>()(
         if (payload) broadcastStateChange('DATA_SYNC', payload);
       },
 
+      updateUserById: (userId, updates) => {
+        let payload: any = null;
+        set((state) => {
+          const next = {
+            users: state.users.map((u) => (u.id === userId ? { ...u, ...updates } : u)),
+          };
+          payload = next;
+          return next;
+        });
+        if (payload) broadcastStateChange('DATA_SYNC', payload);
+      },
+
       updateUserPermissions: (userId, permissions) => {
         let payload: any = null;
         set((state) => {
@@ -1036,7 +1189,7 @@ export const useBusinessStore = create<BusinessState>()(
     }),
     {
       name: 'retalio-business-data',
-      version: 6,
+      version: 7,
       migrate: (persistedState: any, version: number) => {
         if (
           version < 6 ||
@@ -1063,7 +1216,21 @@ export const useBusinessStore = create<BusinessState>()(
             isSyncing: false,
           };
         }
-        return persistedState;
+        const existingTenants: Tenant[] = Array.isArray(persistedState.allTenants) ? persistedState.allTenants : [defaultTenant];
+        const mergedTenants = [...existingTenants];
+        for (const dt of defaultAllTenants) {
+          if (!mergedTenants.some((t) => t.id === dt.id)) mergedTenants.push(dt);
+        }
+        const existingUsers: User[] = Array.isArray(persistedState.users) ? persistedState.users : defaultUsers;
+        const mergedUsers = [...existingUsers];
+        for (const du of defaultUsers) {
+          if (!mergedUsers.some((u) => u.id === du.id || u.email === du.email)) mergedUsers.push(du);
+        }
+        return {
+          ...persistedState,
+          allTenants: mergedTenants,
+          users: mergedUsers,
+        };
       },
     },
   ),

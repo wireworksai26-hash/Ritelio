@@ -33,4 +33,16 @@ describe('bootSeedPlan', () => {
   it('kunci induk tepat 16 karakter diterima', () => {
     expect(bootSeedPlan({ SEED_BUSINESSES_ON_BOOT: 'yes', SEED_MASTER_SECRET: 'a'.repeat(16) }).run).toBe(true);
   });
+
+  it('data transaksi contoh ikut diisi secara bawaan, dan hanya "no" yang mematikannya', () => {
+    const base = { SEED_BUSINESSES_ON_BOOT: 'yes', SEED_MASTER_SECRET: MASTER };
+    expect(bootSeedPlan(base).demo).toBe(true);
+    expect(bootSeedPlan({ ...base, SEED_DEMO_ON_BOOT: 'yes' }).demo).toBe(true);
+    expect(bootSeedPlan({ ...base, SEED_DEMO_ON_BOOT: 'no' }).demo).toBe(false);
+  });
+
+  it('tanpa seed bisnis, data transaksi contoh tidak pernah jalan sendirian', () => {
+    expect(bootSeedPlan({ SEED_DEMO_ON_BOOT: 'yes', SEED_MASTER_SECRET: MASTER }).demo).toBe(false);
+    expect(bootSeedPlan({ SEED_BUSINESSES_ON_BOOT: 'yes' }).demo).toBe(false);
+  });
 });

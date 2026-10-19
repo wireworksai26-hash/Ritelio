@@ -1,11 +1,12 @@
 import type { DemoContext, DemoDomain } from './context';
+import { runCommercial } from './commercial/run';
 
-// Domain "commercial": diisi oleh pemilik domain ini. Orchestrator ada di ../seed-demo.ts dan konteks di ./context.ts.
+// Domain "commercial": POS harian, CRM (prospek sampai penerimaan pelanggan), pesanan, dan piutang.
+// Orchestrator ada di ../seed-demo.ts dan konteks di ./context.ts.
 export const commercialDomain: DemoDomain = {
   key: 'commercial',
-  implemented: false,
   title: 'Penjualan: kasir POS, CRM, pesanan, piutang',
-  async run(_ctx: DemoContext) {
-    // belum diisi
+  async run(ctx: DemoContext) {
+    await runCommercial(ctx);
   },
 };

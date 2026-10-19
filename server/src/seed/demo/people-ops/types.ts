@@ -2,13 +2,16 @@ import type { DemoRole } from '../context';
 import type { ScriptedDay } from './attendance-plan';
 import type { SeriesSpec } from './sensor-series';
 
-/** Semua offset waktu bermakna "hari lalu" (negatif = ke depan), dipetakan lewat ctx.daysAgo/ctx.at. */
+/**
+ * Bentuk data seed people-ops per usaha. Semua offset waktu bermakna "hari lalu" (negatif = ke depan) dan
+ * dipetakan lewat ctx.daysAgo/ctx.at. Karyawan dirujuk lewat nomor karyawan (mis. "KS-0002").
+ */
 
 // ───────── SDM ─────────
 
 export interface LeaveSeed {
   employee: string;
-  /** Kunci alami: dipakai sebagai alasan cuti, diawali "[demo]" saat disimpan. */
+  /** Kunci alami: disimpan sebagai alasan cuti dengan awalan "[demo] ". */
   reason: string;
   startAgo: number;
   /** rentang kalender (hari) */
@@ -31,7 +34,7 @@ export interface ApplicantSeed {
   rejectedAfter?: 'applied' | 'screening' | 'interview' | 'offer';
   rejectReason?: string;
   /** untuk path 'hired' */
-  hire?: { salary: number; hireAgo: number; createUser: boolean };
+  hire?: { salary: number; hireAgo: number };
 }
 
 export interface PostingSeed {
@@ -71,12 +74,14 @@ export interface ReviewSeed {
   employee: string;
   strengths: string;
   improvements: string;
-  /** periode berjalan dikirim (submitted) atau tetap draf */
+  /** penilaian periode berjalan dikirim (submitted) atau tetap draf */
   submitCurrent: boolean;
 }
 
 export interface PayrollAdjustSeed {
   employee: string;
+  /** 0 = bulan berjalan, 1 = bulan lalu, dst. */
+  monthsBack: number;
   bonus?: number;
   otherEarning?: number;
   otherDeduction?: number;
@@ -89,9 +94,8 @@ export interface HrSeed {
   kpis: KpiSeed[];
   kpiTargets: KpiTargetSeed[];
   reviews: ReviewSeed[];
-  /** penyesuaian payroll bulan lalu (bonus kinerja, kasbon, dst.) */
-  payrollPrev: PayrollAdjustSeed[];
-  payrollCur: PayrollAdjustSeed[];
+  /** bonus kinerja, kasbon, dst. */
+  payrollAdjust: PayrollAdjustSeed[];
 }
 
 // ───────── Proyek ─────────
@@ -117,14 +121,17 @@ export interface AllocationSeed {
   endAgo?: number;
 }
 
-export interface TimesheetSeed {
+/** Deret timesheet harian satu karyawan; hanya hari kerja yang cocok dengan `weekdays` (1=Senin ... 5=Jumat). */
+export interface TimesheetPlan {
   employee: string;
-  ago: number;
+  /** rentang inklusif, fromAgo >= toAgo */
+  fromAgo: number;
+  toAgo: number;
+  weekdays: number[];
   hours: number;
   rate: number;
   note: string;
-  /** 'submitted' tetap menunggu persetujuan; 'approved' disetujui sebelum penagihan; 'approved-after' sesudahnya */
-  stage: 'submitted' | 'approved' | 'approved-after';
+  billable: boolean;
 }
 
 export interface ProjectSeed {
@@ -137,10 +144,13 @@ export interface ProjectSeed {
   endAgo: number;
   description: string;
   status: 'planning' | 'active' | 'on_hold' | 'completed';
-  billable: boolean;
   milestones: MilestoneSeed[];
   allocations: AllocationSeed[];
-  timesheets: TimesheetSeed[];
+  timesheets: TimesheetPlan[];
+  /** baris dengan ago >= nilai ini disetujui SEBELUM penagihan */
+  approveBeforeBillAgo: number;
+  /** baris lain dengan ago >= nilai ini disetujui SESUDAH penagihan (belum ditagih); sisanya menunggu persetujuan */
+  approveAfterBillAgo: number;
   /** terbitkan faktur piutang dari timesheet billable yang sudah disetujui */
   bill: boolean;
 }
@@ -180,12 +190,16 @@ export interface WorkOrderSeed {
   priority: 'low' | 'medium' | 'high' | 'urgent';
   /** plat kendaraan bila terkait kendaraan */
   vehicle?: string;
+  /** nama aset non-kendaraan */
   assetRef?: string;
   /** deskripsi rencana perawatan yang ditautkan */
   plan?: string;
   assignee: string;
   scheduledAgo: number;
   state: 'open' | 'in_progress' | 'completed' | 'closed';
+  /** kapan mulai dikerjakan / selesai (hari lalu) */
+  startedAgo?: number;
+  doneAgo?: number;
   laborCost?: number;
   partsCost?: number;
   resolution?: string;
@@ -201,16 +215,22 @@ export interface TrackingEventSeed {
 }
 
 export interface ShipmentSeed {
-  /** kunci alami; disimpan sebagai awalan catatan "[demo] ..." */
+  /** kunci alami; disimpan sebagai awalan catatan "[demo:KEY] ..." */
   key: string;
+  note: string;
   origin: string;
   destination: string;
   outletIndex: number;
   vehicle?: string;
   items: Array<{ sku: string; qty: number }>;
-  /** jalur kurir pihak ketiga (webhook bertanda tangan) atau armada sendiri (catatan manual) */
+  /** diisi = jalur kurir pihak ketiga (webhook bertanda tangan); kosong = armada sendiri (catatan manual) */
   carrier?: string;
+  /** hari lalu pengiriman dibuat */
+  createdAgo: number;
+  /** urutan kejadian; kosong = masih disiapkan (pending) */
   events: TrackingEventSeed[];
+  /** pengiriman dibatalkan setelah dibuat (hanya bila tanpa event) */
+  cancel?: boolean;
   receiver?: string;
 }
 
@@ -234,27 +254,9 @@ export interface SensorSeed {
   series: Omit<SeriesSpec, 'code'>;
 }
 
-// ───────── Persetujuan ─────────
-
-export interface ApprovalStepSeed {
-  permission: 'approvals:decide' | 'finance:write';
-  /** kosong = tetap menunggu */
-  decision?: { by: DemoRole; result: 'approved' | 'rejected'; note: string };
-}
-
-export interface ApprovalSeed {
-  kind: 'leave' | 'work_order' | 'payroll_current';
-  /** leave: alasan cuti; work_order: judul */
-  ref?: string;
-  submittedBy: DemoRole;
-  note: string;
-  steps: ApprovalStepSeed[];
-}
-
 export interface PeopleOpsSeed {
   hr: HrSeed;
   projects: ProjectSeed[];
   fleet: FleetSeed;
   sensors: SensorSeed[];
-  approvals: ApprovalSeed[];
 }

@@ -176,6 +176,43 @@ describe('OperationsService', () => {
     });
   });
 
+  describe('updateWorkOrder: penutupan berbiaya', () => {
+    it('akun Beban Pemeliharaan (6400) dibuat bila COA belum punya, lalu jurnal terbit seimbang', async () => {
+      const accounts = new Map<string, string>([['1000', 'acc-1000']]);
+      const created: Row[] = [];
+      const posted: Row[] = [];
+      const { prisma } = mockPrisma({
+        workOrder: { id: 'wo-1', tenantId: 'tenant-1', companyId: 'company-1', status: 'in_progress', number: 'WO-1', laborCost: 0, partsCost: 0, maintenancePlanId: null, assetRef: '', vehicleRef: null },
+      });
+      Object.assign(prisma, {
+        workOrder: {
+          findFirst: async () => ({ id: 'wo-1', tenantId: 'tenant-1', companyId: 'company-1', status: 'in_progress', number: 'WO-1', laborCost: 0, partsCost: 0, maintenancePlanId: null, assetRef: '', vehicleRef: null }),
+          updateMany: async () => ({ count: 1 }),
+          findUniqueOrThrow: async () => ({ id: 'wo-1', status: 'closed' }),
+        },
+        chartOfAccount: {
+          findFirst: async ({ where }: { where: { code: string } }) => (accounts.has(where.code) ? { id: accounts.get(where.code), code: where.code } : null),
+          findFirstOrThrow: async ({ where }: { where: { code: string } }) => ({ id: accounts.get(where.code), code: where.code }),
+          createMany: async ({ data }: { data: Array<{ code: string }> }) => {
+            created.push(...data);
+            for (const a of data) accounts.set(a.code, `acc-${a.code}`);
+            return { count: data.length };
+          },
+        },
+        maintenancePlan: { findMany: async () => [] },
+      });
+      const journals = { post: async (_tx: unknown, input: Row) => { posted.push(input); return { id: 'j1' }; } };
+      const service = new OperationsService(prisma as never, journals as never, {} as never, {} as never);
+
+      await service.updateWorkOrder('tenant-1', 'wo-1', { status: 'closed', laborCost: 250_000, partsCost: 380_000 });
+
+      expect(created).toEqual([expect.objectContaining({ code: '6400', type: 'expense' })]);
+      const lines = (posted[0] as { lines: Array<{ accountId: string; direction: string; amount: number }> }).lines;
+      expect(lines.find((l) => l.direction === 'debit')).toMatchObject({ accountId: 'acc-6400', amount: 630_000 });
+      expect(lines.find((l) => l.direction === 'credit')).toMatchObject({ accountId: 'acc-1000', amount: 630_000 });
+    });
+  });
+
   describe('createShipment', () => {
     it('menolak shipment tanpa item walau dipanggil langsung', async () => {
       const { prisma } = mockPrisma();

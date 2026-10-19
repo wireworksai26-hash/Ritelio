@@ -31,6 +31,14 @@ const SUMMARY_MODELS = [
 const log = (msg: string) => console.log(msg);
 const csv = (v: string | undefined) => (v ? v.split(',').map((x) => x.trim()).filter(Boolean) : []);
 
+export interface SeedDemoOptions {
+  only?: string[];
+  onlyBusinesses?: string[];
+  force?: boolean;
+  /** true bila pemanggil sudah menyatakan persetujuan eksplisit (mis. SEED_DEMO_ON_BOOT) di produksi. */
+  allowProduction?: boolean;
+}
+
 async function summary(ctx: DemoContext): Promise<string> {
   const parts: string[] = [];
   for (const model of SUMMARY_MODELS) {
@@ -45,13 +53,14 @@ async function summary(ctx: DemoContext): Promise<string> {
   return parts.join(' ');
 }
 
-async function main(): Promise<void> {
-  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_DATA !== 'yes') {
+/** Mengembalikan jumlah langkah yang gagal; melempar hanya untuk kesalahan konfigurasi. */
+export async function seedDemo(opts: SeedDemoOptions = {}): Promise<number> {
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_DATA !== 'yes' && !opts.allowProduction) {
     throw new Error('Data contoh ditolak di produksi. Jalankan ulang dengan ALLOW_DEMO_DATA=yes bila memang disengaja.');
   }
-  const only = csv(process.env.SEED_DEMO_ONLY);
-  const onlyBiz = csv(process.env.SEED_DEMO_BUSINESSES);
-  const force = process.env.SEED_DEMO_FORCE === 'yes';
+  const only = opts.only ?? csv(process.env.SEED_DEMO_ONLY);
+  const onlyBiz = opts.onlyBusinesses ?? csv(process.env.SEED_DEMO_BUSINESSES);
+  const force = opts.force ?? process.env.SEED_DEMO_FORCE === 'yes';
   const unknown = only.filter((k) => !DEMO_DOMAINS.some((d) => d.key === k));
   if (unknown.length) throw new Error(`Domain tidak dikenal: ${unknown.join(', ')}. Pilihan: ${DEMO_DOMAINS.map((d) => d.key).join(', ')}`);
 
@@ -106,16 +115,21 @@ async function main(): Promise<void> {
   } finally {
     await app.close();
   }
-  if (failures > 0) {
-    console.error(`\n${failures} langkah gagal. Perbaiki penyebabnya lalu jalankan ulang: yang sudah selesai dilewati.`);
-    process.exit(1);
-  }
-  log('\nData contoh selesai.');
+  return failures;
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error('\nSeed data contoh gagal:', err instanceof Error ? err.message : err);
-    process.exit(1);
-  });
+if (require.main === module) {
+  seedDemo()
+    .then((failures) => {
+      if (failures > 0) {
+        console.error(`\n${failures} langkah gagal. Perbaiki penyebabnya lalu jalankan ulang: yang sudah selesai dilewati.`);
+        process.exit(1);
+      }
+      log('\nData contoh selesai.');
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error('\nSeed data contoh gagal:', err instanceof Error ? err.message : err);
+      process.exit(1);
+    });
+}

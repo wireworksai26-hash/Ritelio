@@ -38,6 +38,7 @@ import { CrmModule } from './modules/crm/crm.module';
 import { HrmModule } from './modules/hrm/hrm.module';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
 import { OperationsModule } from './modules/operations/operations.module';
+import { SuperadminModule } from './modules/superadmin/superadmin.module';
 
 // Modular monolith (TRD): tiap domain = modul; guards & audit global.
 @Module({
@@ -81,6 +82,7 @@ OperationsModule,
     AiModule,
     NotificationsModule,
     ModulesConfigModule,
+    SuperadminModule,
   ],
   providers: [
     // Samarkan error non-HTTP (Prisma/bug) agar stack & pesan internal tidak sampai ke klien.

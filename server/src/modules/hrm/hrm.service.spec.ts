@@ -60,6 +60,15 @@ describe('HrmService.postPayroll', () => {
     expect(created).toEqual([expect.objectContaining({ code: '2300', type: 'liability' })]);
   });
 
+  it('COA bawaan pendaftaran tidak punya 6300/2160/2200: akun dibuat saat posting, bukan 404', async () => {
+    const { service, created, post } = payrollSetup({ accounts: [] });
+    await service.postPayroll('t1', 'run-1');
+    expect(created.map((a) => [a.code, a.type])).toEqual(
+      expect.arrayContaining([['6300', 'expense'], ['2160', 'liability'], ['2200', 'liability'], ['2300', 'liability']]),
+    );
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
   it('post paralel: klaim draft->approved kalah -> 409 dan jurnal TIDAK diterbitkan dua kali', async () => {
     const { service, post } = payrollSetup({ claimCount: 0 });
     await expect(service.postPayroll('t1', 'run-1')).rejects.toBeInstanceOf(ConflictException);
