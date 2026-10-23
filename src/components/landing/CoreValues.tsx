@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../../lib/format';
 import { toast } from '../../stores/toastStore';
@@ -6,8 +6,6 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Icon, type IconName } from '../icons/Icon';
-
-const AUTOPLAY_MS = 6000;
 
 function RolesVisual() {
   const roles: Array<[string, string]> = [
@@ -148,15 +146,10 @@ const VALUES: Value[] = [
   },
 ];
 
-// Core values: 4 tab vertikal dengan autoplay
+// Core values: 4 tab vertikal, berganti hanya saat diklik (tanpa pergantian otomatis)
 export function CoreValues() {
   const [active, setActive] = useState(0);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    const t = setInterval(() => setActive((a) => (a + 1) % VALUES.length), AUTOPLAY_MS);
-    return () => clearInterval(t);
-  }, [active]);
 
   const value = VALUES[active];
 
@@ -183,11 +176,7 @@ export function CoreValues() {
               <span className="text-caption text-fossil">{v.sub}</span>
               {active === i && (
                 <span className="absolute bottom-0 left-0 hidden lg:block h-[2px] w-full bg-sand overflow-hidden rounded-full">
-                  <span
-                    key={active}
-                    className="block h-full bg-ink tab-progress"
-                    style={{ animationDuration: `${AUTOPLAY_MS}ms` }}
-                  />
+                  <span className="block h-full w-full bg-ink" />
                 </span>
               )}
             </button>

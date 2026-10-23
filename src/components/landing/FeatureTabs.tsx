@@ -1,10 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { cn } from '../../lib/format';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { Icon } from '../icons/Icon';
-
-const AUTOPLAY_MS = 8000;
 
 function JualVisual() {
   return (
@@ -245,14 +243,9 @@ const TABS: FeatureTab[] = [
   },
 ];
 
-// Tab besar dengan autoplay + garis progres hairline
+// Tab besar: berganti hanya saat diklik, tanpa pergantian otomatis supaya pembaca tidak terburu-buru
 export function FeatureTabs() {
   const [active, setActive] = useState(0);
-
-  useEffect(() => {
-    const t = setInterval(() => setActive((a) => (a + 1) % TABS.length), AUTOPLAY_MS);
-    return () => clearInterval(t);
-  }, [active]);
 
   const tab = TABS[active];
 
@@ -278,13 +271,7 @@ export function FeatureTabs() {
               )}
             </button>
             <span className="mx-3 sm:mx-4 mt-1 h-[2px] rounded-full bg-sand overflow-hidden">
-              {active === i && (
-                <span
-                  key={active}
-                  className="block h-full bg-ink tab-progress"
-                  style={{ animationDuration: `${AUTOPLAY_MS}ms` }}
-                />
-              )}
+              {active === i && <span className="block h-full w-full bg-ink" />}
             </span>
           </div>
         ))}
