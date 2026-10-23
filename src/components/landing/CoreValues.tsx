@@ -82,7 +82,10 @@ function SingleSourceVisual() {
 function ExplainableAiVisual() {
   return (
     <Card className="w-full max-w-sm p-5">
-      <Badge variant="accent" icon="assistant">Saran AI</Badge>
+      <div className="flex items-center justify-between gap-2">
+        <Badge variant="accent" icon="assistant">Saran AI</Badge>
+        <span className="text-caption text-pebble">Contoh tampilan</span>
+      </div>
       <p className="mt-3 text-[15px] text-ink leading-relaxed">
         Buat PO 60 pcs Croissant Mentega ke CV Dairy Fresh sebelum Jumat.
       </p>
@@ -90,7 +93,7 @@ function ExplainableAiVisual() {
         Berdasarkan: inventory_stock:stk-6 · stock_movements:14 hari
       </p>
       <div className="mt-4 flex gap-2">
-        <Button size="sm" onClick={() => toast({ title: 'Ini contoh tampilan', description: 'Di aplikasi, saran menunggu persetujuanmu.', icon: 'info' })}>Terapkan</Button>
+        <Button size="sm" onClick={() => toast({ title: 'Ini contoh tampilan', description: 'Di aplikasi, Retalio Intelligence hanya memberi saran dan tidak mengubah data apa pun. Keputusan tetap di tanganmu.', icon: 'info' })}>Terapkan</Button>
         <Button size="sm" variant="ghost" onClick={() => toast({ title: 'Ini contoh tampilan', icon: 'info' })}>Abaikan</Button>
       </div>
     </Card>
@@ -140,7 +143,7 @@ const VALUES: Value[] = [
     label: 'AI Terjelaskan',
     sub: 'Bukan kotak hitam',
     heading: 'AI yang menyebut sumbernya.',
-    body: 'Setiap insight menyertakan data yang dipakai, dan setiap rekomendasi menunggu persetujuanmu. Retalio Intelligence menyarankan, kamu yang memutuskan.',
+    body: 'Jawaban cepat dihitung langsung dari data tokomu dan menampilkan sumbernya. Untuk pertanyaan lain, AI hanya memberi saran: tidak ada data yang diubah atau pesanan yang dibuat tanpa kamu. Retalio Intelligence menyarankan, kamu yang memutuskan.',
     bg: 'bg-chartreuse',
     visual: <ExplainableAiVisual />,
   },
