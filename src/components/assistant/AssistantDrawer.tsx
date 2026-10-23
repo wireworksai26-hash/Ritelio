@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { suggestionPrompts } from '../../data/assistantBrain';
+import { assistantCanAnswer, assistantLimits } from '../../data/assistantHelp';
 import { cn, formatTime } from '../../lib/format';
 import { useAssistantStore } from '../../stores/assistantStore';
 import { useSyncStore } from '../../stores/syncStore';
@@ -75,6 +76,27 @@ export function AssistantDrawer() {
                 </button>
               ))}
             </div>
+            <details className="mt-5 rounded-lg border border-ash bg-bone px-3.5 py-3 text-body-sm">
+              <summary className="cursor-pointer select-none text-ink">Apa yang bisa ditanyakan, dan batasnya</summary>
+              <div className="mt-3 space-y-3 text-fossil">
+                <div>
+                  <p className="text-caption font-medium text-ink">Langsung dijawab dari data tokomu</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                    {assistantCanAnswer.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="text-caption font-medium text-ink">Batasnya</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                    {assistantLimits.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </details>
           </div>
         )}
 
