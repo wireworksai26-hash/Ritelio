@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
 import { LogoMark } from '../layout/Logo';
 import { Icon } from '../icons/Icon';
+import { detectInstallPlatform, type InstallPlatform } from '../../lib/installPlatform';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -10,17 +11,60 @@ interface BeforeInstallPromptEvent extends Event {
 
 const DISMISS_KEY = 'retalio-install-dismissed';
 
+const NOT_IOS: InstallPlatform = { isIOS: false, isIPad: false, isInAppBrowser: false, isSafari: false };
+
+// Ikon tombol Bagikan iOS (kotak dengan panah ke atas), supaya pengguna tahu persis tombol yang dicari.
+function ShareGlyph({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="inline-block align-text-bottom"
+    >
+      <path d="M12 15V3" />
+      <path d="M8 7l4-4 4 4" />
+      <path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1" />
+    </svg>
+  );
+}
+
+function ArrowGlyph({ direction }: { direction: 'up' | 'down' }) {
+  return (
+    <svg
+      width="28"
+      height="28"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={direction === 'up' ? 'rotate-180' : undefined}
+    >
+      <path d="M12 4v16" />
+      <path d="M6 14l6 6 6-6" />
+    </svg>
+  );
+}
+
 export function InstallBanner() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISS_KEY) === '1');
-  const [isIOS, setIsIOS] = useState(false);
+  const [platform, setPlatform] = useState<InstallPlatform>(NOT_IOS);
   const [showIOSGuide, setShowIOSGuide] = useState(false);
+  const { isIOS, isIPad, isInAppBrowser, isSafari } = platform;
 
   useEffect(() => {
-    // Deteksi iOS Safari
-    const ua = window.navigator.userAgent.toLowerCase();
-    const isIosDevice = /iphone|ipad|ipod/.test(ua) && !(window as unknown as { MSStream?: boolean }).MSStream;
-    setIsIOS(isIosDevice);
+    // Deteksi iOS (iPhone, iPad, dan iPadOS yang menyamar sebagai Mac)
+    setPlatform(detectInstallPlatform(window.navigator));
 
     const handler = (e: Event) => {
       e.preventDefault();
@@ -41,6 +85,16 @@ export function InstallBanner() {
   const canShow = Boolean(deferred) || isIOS;
   if (!canShow) return null;
 
+  const device = isIPad ? 'iPad' : 'iPhone';
+  // Posisi tombol Bagikan hanya pasti di Safari: bilah bawah di iPhone, pojok kanan atas di iPad.
+  const shareLocation = isSafari
+    ? isIPad
+      ? 'di pojok kanan atas Safari'
+      : 'di menu bawah Safari'
+    : 'di menu browser Anda';
+  // Browser dalam aplikasi tidak punya "Tambahkan ke Layar Utama": arahkan ke Safari, bukan ke panduan.
+  const needsSafari = !deferred && isIOS && isInAppBrowser;
+
   return (
     <>
       <div className="fixed bottom-20 lg:bottom-6 left-4 lg:left-6 z-50 w-[calc(100vw-2rem)] max-w-sm bg-paper border border-ash rounded-xl p-4 shadow-xl animate-fade-in">
@@ -49,7 +103,9 @@ export function InstallBanner() {
           <div className="flex-1 min-w-0">
             <p className="text-[15px] font-medium text-ink">Install Retalio App</p>
             <p className="text-caption text-fossil mt-0.5 leading-relaxed">
-              Akses cepat tanpa browser bar, mode kasir offline, & sinkronisasi otomatis.
+              {needsSafari
+                ? 'Halaman ini terbuka di browser dalam aplikasi, yang tidak bisa memasang Retalio. Buka di Safari: ketuk ikon titik tiga atau kompas, lalu pilih "Buka di Safari".'
+                : 'Akses cepat tanpa browser bar, mode kasir offline, & sinkronisasi otomatis.'}
             </p>
             <div className="mt-3 flex items-center gap-2">
               {deferred ? (
@@ -63,9 +119,9 @@ export function InstallBanner() {
                 >
                   Install Sekarang
                 </Button>
-              ) : isIOS ? (
+              ) : isIOS && !needsSafari ? (
                 <Button size="sm" onClick={() => setShowIOSGuide(true)}>
-                  Cara Install di iPhone
+                  Cara Install di {device}
                 </Button>
               ) : null}
               <Button
@@ -93,13 +149,21 @@ export function InstallBanner() {
         </div>
       </div>
 
-      {/* Modal panduan khusus iOS Safari */}
+      {/* Modal panduan khusus iOS */}
       {showIOSGuide && (
-        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/60 p-4 animate-fade-in">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ios-install-title"
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 animate-fade-in"
+        >
           <div className="w-full max-w-sm rounded-2xl bg-paper p-6 border border-ash shadow-2xl">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-heading-sm font-light text-ink">Install di iPhone / iPad</h3>
+              <h3 id="ios-install-title" className="text-heading-sm font-light text-ink">
+                Install di {isIPad ? 'iPad' : 'iPhone'}
+              </h3>
               <button
+                aria-label="Tutup panduan"
                 onClick={() => setShowIOSGuide(false)}
                 className="p-1 text-fossil hover:text-ink"
               >
@@ -111,7 +175,9 @@ export function InstallBanner() {
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sand text-caption font-medium text-ink">
                   1
                 </span>
-                <span>Tekan tombol <strong>Bagikan / Share</strong> (ikon kotak berpanah ke atas) di menu bawah Safari.</span>
+                <span>
+                  Tekan tombol <strong>Bagikan / Share</strong> <ShareGlyph /> (kotak dengan panah ke atas) {shareLocation}.
+                </span>
               </li>
               <li className="flex items-start gap-2.5">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sand text-caption font-medium text-ink">
@@ -132,6 +198,24 @@ export function InstallBanner() {
               </Button>
             </div>
           </div>
+
+          {/* Penunjuk ke tombol Bagikan, hanya di Safari tempat posisinya pasti */}
+          {isSafari && (
+            <div
+              data-testid="share-pointer"
+              className={
+                isIPad
+                  ? 'pointer-events-none fixed right-4 top-2 z-[80] flex flex-col items-center text-chartreuse animate-bounce'
+                  : 'pointer-events-none fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1/2 z-[80] flex -translate-x-1/2 flex-col items-center text-chartreuse animate-bounce'
+              }
+            >
+              {isIPad && <ArrowGlyph direction="up" />}
+              <span className="rounded-full bg-paper px-3 py-1 text-caption font-medium text-ink shadow-lg">
+                Ketuk Bagikan di sini
+              </span>
+              {!isIPad && <ArrowGlyph direction="down" />}
+            </div>
+          )}
         </div>
       )}
     </>
