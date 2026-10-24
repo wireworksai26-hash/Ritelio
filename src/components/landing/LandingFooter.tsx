@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { INTAKE_FORM_URL, SALES_EMAIL, SALES_WHATSAPP_DISPLAY, salesMailtoUrl, salesWhatsAppUrl } from '../../config/contact';
 import { toast } from '../../stores/toastStore';
+import { NewsletterForm } from './NewsletterForm';
 import { Icon } from '../icons/Icon';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -84,15 +84,7 @@ function FooterMenuLink({ link }: { link: FooterLink }) {
 }
 
 export function LandingFooter() {
-  const [email, setEmail] = useState('');
   const whatsapp = salesWhatsAppUrl(GREETING);
-
-  const subscribe = (e: FormEvent) => {
-    e.preventDefault();
-    if (!email.trim()) return;
-    toast({ title: 'Berhasil berlangganan', description: 'Insight bisnis dikirim tiap minggu.', icon: 'mail' });
-    setEmail('');
-  };
 
   return (
     <footer className="border-t border-ash">
@@ -140,24 +132,11 @@ export function LandingFooter() {
           </Card>
 
           <Card className="p-5 h-fit">
-            <p className="text-[15px] text-ink">Insight bisnis tiap minggu</p>
+            <p className="text-[15px] text-ink">Insight bisnis, dua kali sebulan</p>
             <p className="mt-1 text-body-sm text-fossil">
               Panduan operasional & AI untuk UKM. Tanpa spam.
             </p>
-            <form onSubmit={subscribe} className="mt-4 flex gap-2">
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="email@bisnismu.id"
-                aria-label="Email untuk newsletter"
-                className="flex-1 min-w-0 bg-paper border border-pebble/70 rounded-lg px-3 py-2.5 text-[15px] placeholder:text-pebble focus:border-ink focus:outline-none"
-              />
-              <Button size="sm" type="submit">
-                Langganan
-              </Button>
-            </form>
+            <NewsletterForm />
           </Card>
           </div>
         </div>

@@ -37,6 +37,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { HrmModule } from './modules/hrm/hrm.module';
 import { IntakeModule } from './modules/intake/intake.module';
+import { NewsletterModule } from './modules/newsletter/newsletter.module';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
 import { OperationsModule } from './modules/operations/operations.module';
 import { SuperadminModule } from './modules/superadmin/superadmin.module';
@@ -85,6 +86,7 @@ OperationsModule,
     ModulesConfigModule,
     SuperadminModule,
     IntakeModule,
+    NewsletterModule,
   ],
   providers: [
     // Samarkan error non-HTTP (Prisma/bug) agar stack & pesan internal tidak sampai ke klien.

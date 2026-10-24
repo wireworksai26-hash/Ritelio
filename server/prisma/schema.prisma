@@ -3071,3 +3071,24 @@ model OnboardingSubmission {
   @@index([createdAt])
   @@map("onboarding_submissions")
 }
+
+/// Pelanggan newsletter dari formulir di footer halaman depan. Data tingkat platform (bukan milik tenant): hanya
+/// superadmin yang dapat membacanya. `status` mengikuti persetujuan: pending (email dicatat, belum dikonfirmasi lewat
+/// email), confirmed (sudah mengonfirmasi), unsubscribed (berhenti). Pengiriman email belum ada; konfirmasi menyusul.
+model NewsletterSubscriber {
+  id             String    @id @default(uuid())
+  /// Huruf kecil dan sudah dirapikan. Unik, supaya satu alamat hanya punya satu baris.
+  email          String    @unique
+  /// pending | confirmed | unsubscribed
+  status         String    @default("pending")
+  source         String    @default("footer")
+  /// Kapan pengunjung mengisi formulir dan menyetujui kalimat persetujuannya.
+  consentAt      DateTime  @map("consent_at")
+  confirmedAt    DateTime? @map("confirmed_at")
+  unsubscribedAt DateTime? @map("unsubscribed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@map("newsletter_subscribers")
+}

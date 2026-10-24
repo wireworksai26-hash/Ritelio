@@ -26,6 +26,7 @@ import { isValidUuid } from '../lib/onesignal';
 import { maskApiKey } from '../lib/security';
 import { AVAILABLE_NIM_MODELS, FALLBACK_OPTIONS, useAiConfigStore } from '../stores/aiConfigStore';
 import { IntakeTab } from '../components/superadmin/IntakeTab';
+import { NewsletterTab } from '../components/superadmin/NewsletterTab';
 import { OnboardingTab } from '../components/superadmin/OnboardingTab';
 import { useAuthStore } from '../stores/authStore';
 import { useBusinessStore } from '../stores/businessStore';
@@ -91,12 +92,13 @@ interface ApiOverview {
   diagnostics: ApiDiagnostics;
 }
 
-type SuperadminTab = 'tenants' | 'intake' | 'onboarding' | 'users' | 'push' | 'audit' | 'system';
+type SuperadminTab = 'tenants' | 'intake' | 'onboarding' | 'newsletter' | 'users' | 'push' | 'audit' | 'system';
 
 const tabOptions: Array<{ value: SuperadminTab; label: string }> = [
   { value: 'tenants', label: 'Tenant & Institusi' },
   { value: 'intake', label: 'Pengajuan Calon Klien' },
   { value: 'onboarding', label: 'Data Awal Klien' },
+  { value: 'newsletter', label: 'Pelanggan Newsletter' },
   { value: 'users', label: 'Pengguna Global' },
   { value: 'push', label: 'Push & Broadcast' },
   { value: 'audit', label: 'Audit & Keamanan' },
@@ -502,6 +504,9 @@ export default function Superadmin() {
 
       {/* Data awal klien dari Google Form 2 (setelah berlangganan) */}
       {tab === 'onboarding' && <OnboardingTab />}
+
+      {/* Pelanggan newsletter dari formulir footer halaman depan */}
+      {tab === 'newsletter' && <NewsletterTab />}
 
       {/* Tab 3: Push & Broadcast OneSignal */}
       {tab === 'push' && <PushTab tenants={tenants} />}

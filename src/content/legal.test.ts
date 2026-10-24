@@ -63,6 +63,13 @@ describe('isi naskah mengikuti perilaku aplikasi', () => {
     expect(text).not.toMatch(/\b14 hari\b|Rp\s?\d/);
   });
 
+  it('Privasi menyebut newsletter: data, tujuan, dan masa simpan', () => {
+    const text = textOf(buildPrivacy(contact));
+    expect(text).toMatch(/formulir langganan pada footer/);
+    expect(text).toMatch(/insight bisnis dan kabar pembaruan/);
+    expect(text).toMatch(/Alamat newsletter disimpan sampai/);
+  });
+
   it('Privasi menyebut penyedia model AI, redaksi data sensitif, dan UU PDP', () => {
     const text = textOf(buildPrivacy(contact));
     expect(text).toMatch(/penyedia model AI/);

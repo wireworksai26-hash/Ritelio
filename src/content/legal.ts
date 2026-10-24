@@ -216,6 +216,7 @@ export function buildPrivacy(contact: LegalContact): LegalDocument {
           'Formulir konsultasi: nama, nomor WhatsApp, email, dan keterangan usaha yang Anda isi di Google Form kami.',
           'Formulir data awal setelah berlangganan: data usaha yang Anda kirim untuk menyiapkan akun, yang dapat memuat data karyawan, pemasok, dan pelanggan Anda.',
           'Pertanyaan yang Anda ajukan ke asisten AI, dan gambar nota yang Anda unggah untuk dibaca (OCR).',
+          'Newsletter: alamat email yang Anda tulis di formulir langganan pada footer halaman depan, beserta waktu persetujuan Anda.',
         ],
       },
       {
@@ -226,6 +227,7 @@ export function buildPrivacy(contact: LegalContact): LegalDocument {
           'Menghubungi calon klien dan menyiapkan penawaran atau konsultasi.',
           'Menyiapkan akun dari data awal yang Anda kirim.',
           'Menjawab pertanyaan, mengirim pemberitahuan layanan, dan memberi dukungan.',
+          'Mengirim insight bisnis dan kabar pembaruan Retalio kepada yang berlangganan newsletter, setelah alamatnya dikonfirmasi lewat email.',
           'Mencegah penyalahgunaan dan memenuhi kewajiban hukum.',
         ],
         paragraphs: ['Kami tidak menjual data Anda dan tidak memakai pelacak iklan.'],
@@ -273,6 +275,7 @@ export function buildPrivacy(contact: LegalContact): LegalDocument {
         bullets: [
           'Data usaha disimpan selama akun ada. Setelah langganan berakhir, data tetap tersimpan dalam mode baca saja, supaya Anda dapat melihat dan mengekspornya.',
           'Data calon klien (formulir konsultasi) disimpan selama diperlukan untuk tindak lanjut penawaran.',
+          'Alamat newsletter disimpan sampai Anda berhenti berlangganan atau meminta penghapusan. Alamat yang berhenti tetap dicatat sebagai berhenti supaya tidak ditambahkan lagi tanpa persetujuan baru, kecuali Anda meminta penghapusan.',
           'Catatan keamanan dan jejak audit disimpan selama diperlukan untuk keamanan dan kewajiban hukum.',
           'Anda dapat meminta penghapusan data. Kami akan memprosesnya sesuai hukum; sebagian data dapat kami simpan bila hukum mewajibkan.',
         ],
