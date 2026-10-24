@@ -9,7 +9,7 @@ const NAMES = [
 
 export function LogoWall() {
   return (
-    <section className="py-20 lg:py-24">
+    <section id="solusi" className="py-20 lg:py-24 scroll-mt-24">
       <Reveal className="mx-auto max-w-3xl px-6 text-center">
         <h2 className="text-heading font-light text-ink">
           Dirancang untuk toko, kafe, pabrik kecil, dan bisnis jasa.

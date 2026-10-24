@@ -8,11 +8,9 @@ import { Card } from '../ui/Card';
 
 const GREETING = 'Halo Tim Retalio, saya ingin konsultasi tentang Retalio.';
 
-const COLUMNS: Array<{ title: string; links: Array<{ label: string; href?: string }> }> = [
-  {
-    title: 'PERUSAHAAN',
-    links: [{ label: 'Tentang' }, { label: 'Blog' }, { label: 'Karier' }, { label: 'Kontak', href: '#kontak' }],
-  },
+// Setiap tautan wajib punya tujuan (href tidak opsional): menu yang belum punya halaman atau bagian tujuan
+// tidak dipasang, supaya tidak ada tautan mati di footer. Tambahkan lagi saat tujuannya ada.
+const COLUMNS: Array<{ title: string; links: Array<{ label: string; href: string }> }> = [
   {
     title: 'PRODUK',
     links: [
@@ -24,12 +22,19 @@ const COLUMNS: Array<{ title: string; links: Array<{ label: string; href?: strin
     ],
   },
   {
-    title: 'SUMBER DAYA',
-    links: [{ label: 'Panduan' }, { label: 'Template' }, { label: 'Bantuan' }, { label: 'Status' }],
+    title: 'SOLUSI',
+    links: [
+      { label: 'Retail & F&B', href: '#solusi' },
+      { label: 'Manufaktur Kecil', href: '#solusi' },
+      { label: 'Jasa', href: '#solusi' },
+    ],
   },
   {
-    title: 'SOLUSI',
-    links: [{ label: 'Retail & F&B' }, { label: 'Manufaktur Kecil' }, { label: 'Jasa' }],
+    title: 'PERUSAHAAN',
+    links: [
+      { label: 'Kontak', href: '#kontak' },
+      { label: 'Keamanan', href: '#keamanan' },
+    ],
   },
 ];
 
@@ -48,18 +53,14 @@ export function LandingFooter() {
     <footer className="border-t border-ash">
       <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8 pt-16">
         <div className="grid gap-12 lg:grid-cols-[1fr_340px]">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-8">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-8">
             {COLUMNS.map((col) => (
               <div key={col.title}>
                 <p className="text-caption text-fossil">{col.title}</p>
                 <ul className="mt-3 space-y-2.5">
                   {col.links.map((l) => (
                     <li key={l.label}>
-                      <a
-                        href={l.href ?? '#'}
-                        onClick={l.href ? undefined : (e) => e.preventDefault()}
-                        className="text-[15px] text-smoke hover:text-ink transition-colors"
-                      >
+                      <a href={l.href} className="text-[15px] text-smoke hover:text-ink transition-colors">
                         {l.label}
                       </a>
                     </li>
@@ -132,9 +133,7 @@ export function LandingFooter() {
           <span className="flex flex-wrap gap-x-5 gap-y-1">
             <Link to="/privasi" className="hover:text-ink transition-colors">Privasi</Link>
             <Link to="/syarat-ketentuan" className="hover:text-ink transition-colors">Syarat &amp; Ketentuan</Link>
-            <a href="#keamanan" className="hover:text-ink transition-colors">Keamanan</a>
-            <a href="#" onClick={(e) => e.preventDefault()} className="hover:text-ink transition-colors">Status</a>
-          </span>
+            <a href="#keamanan" className="hover:text-ink transition-colors">Keamanan</a>          </span>
         </div>
       </div>
     </footer>
