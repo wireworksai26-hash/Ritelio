@@ -1,14 +1,14 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthService, isUsablePasswordHash } from './auth.service';
 
 const PASSWORD = 'Sandi-Valid-2026';
 
-function make(user: Record<string, unknown> | null) {
+function make(user: Record<string, unknown> | null, subscription: { status: string; endsAt: Date | null } | null = null) {
   const prisma = {
     user: { findFirst: vi.fn().mockResolvedValue(user) },
-    subscription: { findFirst: vi.fn().mockResolvedValue(null) },
+    subscription: { findFirst: vi.fn().mockResolvedValue(subscription) },
   };
   const jwt = { signAsync: vi.fn().mockResolvedValue('jwt') };
   const audit = { record: vi.fn().mockResolvedValue(undefined) };
@@ -73,5 +73,45 @@ describe('login dengan hash tidak valid', () => {
     expect(isUsablePasswordHash('!pending-invite')).toBe(false);
     expect(isUsablePasswordHash(null)).toBe(false);
     expect(isUsablePasswordHash(bcrypt.hashSync('x', 4))).toBe(true);
+  });
+});
+
+describe('login menurut keadaan akun (trial habis, ditangguhkan)', () => {
+  beforeEach(() => vi.clearAllMocks());
+  const PAST = new Date(Date.now() - 86_400_000);
+  const FUTURE = new Date(Date.now() + 5 * 86_400_000);
+  const owner = async (settings: unknown = {}) => ({
+    ...baseUser(await bcrypt.hash(PASSWORD, 4)),
+    role: 'owner',
+    tenant: { name: 'T', subscriptionPlan: 'plus_ai', settings },
+  });
+
+  it('trial habis tetap bisa masuk dan menerima keadaan baca saja agar data masih bisa dilihat', async () => {
+    const { service, sessions } = make(await owner(), { status: 'trialing', endsAt: PAST });
+    const res: any = await service.login({ email: 'a@b.co', password: PASSWORD });
+    expect(sessions.start).toHaveBeenCalled();
+    expect(res.access).toMatchObject({ mode: 'read_only', reason: 'trial_expired', subscriptionStatus: 'trialing' });
+    expect(res.access.endsAt).toBe(PAST.toISOString());
+  });
+
+  it('trial berjalan menerima akses penuh', async () => {
+    const { service } = make(await owner(), { status: 'trialing', endsAt: FUTURE });
+    const res: any = await service.login({ email: 'a@b.co', password: PASSWORD });
+    expect(res.access).toMatchObject({ mode: 'full', reason: 'ok' });
+  });
+
+  it('tenant ditangguhkan ditolak masuk dengan kode TENANT_SUSPENDED dan tanpa membuat sesi', async () => {
+    const { service, sessions } = make(await owner({ status: 'suspended' }), { status: 'active', endsAt: null });
+    const err = await service.login({ email: 'a@b.co', password: PASSWORD }).catch((e) => e);
+    expect(err).toBeInstanceOf(ForbiddenException);
+    expect(err.getResponse()).toMatchObject({ code: 'TENANT_SUSPENDED' });
+    expect(sessions.start).not.toHaveBeenCalled();
+  });
+
+  it('superadmin platform tidak dibatasi walau tenant-nya ditangguhkan', async () => {
+    const user = { ...(await owner({ status: 'suspended' })), role: 'superadmin' };
+    const { service } = make(user, { status: 'cancelled', endsAt: PAST });
+    const res: any = await service.login({ email: 'a@b.co', password: PASSWORD });
+    expect(res.access.mode).toBe('full');
   });
 });

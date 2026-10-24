@@ -9,6 +9,14 @@ import * as bcrypt from 'bcryptjs';
 import { authenticator } from 'otplib';
 import { PrismaService } from '../../common/prisma.service';
 import { trialAiQuota, trialEndsAt } from '../../common/config/plans.config';
+import {
+  SUSPENDED_CODE,
+  accessFor,
+  accessMessage,
+  accessPayload,
+  tenantStatusOf,
+  type AccessInfo,
+} from '../../common/subscription/access-state';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import { ensureFiscalCalendar } from '../../common/utils/fiscal-calendar';
@@ -189,10 +197,14 @@ export class AuthService {
       where: { tenantId: tenant.id, email },
     });
     await this.auditAuth(tenant.id, 'register', 'success', user.id);
-    return this.issueTokens(this.toAuthUser(user), tenant.name, tenant.subscriptionPlan, user.name, {
-      mfaVerified: false,
-      ctx,
-    });
+    return this.issueTokens(
+      this.toAuthUser(user),
+      tenant.name,
+      tenant.subscriptionPlan,
+      user.name,
+      { mfaVerified: false, ctx },
+      accessFor({ subscription: { status: 'trialing', endsAt: trialEnds } }),
+    );
   }
 
   async login(dto: LoginDto, ctx: SessionContext = {}) {
@@ -224,18 +236,11 @@ export class AuthService {
       throw new UnauthorizedException('Email/username atau kata sandi salah.');
     }
 
-    // Subscription ended: stop refresh sesi, tapi tetap izinkan akses read-only
-    // agar pengguna bisa melihat billing di akunnya.
-    const subscription = await this.prisma.subscription.findFirst({
-      where: { tenantId: user.tenantId },
-      orderBy: { startedAt: 'desc' },
-    });
-    if (
-      subscription?.status === 'trialing' &&
-      subscription.endsAt &&
-      subscription.endsAt.getTime() < Date.now()
-    ) {
-      throw new ForbiddenException('Masa trial akun Anda sudah berakhir. Perpanjang langganan untuk melanjutkan.');
+    // Trial/langganan berakhir tetap boleh masuk (akses baca saja, ditegakkan PermissionsGuard) agar
+    // pengguna bisa melihat dan mengekspor datanya. Hanya akun yang ditangguhkan yang ditolak masuk.
+    const access = await this.accessOf(user.tenantId, user.tenant?.settings, user.role);
+    if (access.mode === 'suspended') {
+      throw new ForbiddenException({ message: accessMessage(access), code: SUSPENDED_CODE });
     }
 
     // 2FA wajib untuk owner/admin yang sudah mengaktifkannya (TRD Â§keamanan)
@@ -260,6 +265,7 @@ export class AuthService {
       user.tenant?.subscriptionPlan || 'custom',
       user.name,
       { mfaVerified: user.twoFactorEnabled, ctx },
+      access,
     );
   }
 
@@ -297,16 +303,9 @@ export class AuthService {
       throw new UnauthorizedException('Sesi 2FA telah berakhir. Silakan login ulang.');
     }
 
-    const subscription = await this.prisma.subscription.findFirst({
-      where: { tenantId: user.tenantId },
-      orderBy: { startedAt: 'desc' },
-    });
-    if (
-      subscription?.status === 'trialing' &&
-      subscription.endsAt &&
-      subscription.endsAt.getTime() < Date.now()
-    ) {
-      throw new ForbiddenException('Masa trial akun Anda sudah berakhir. Perpanjang langganan untuk melanjutkan.');
+    const access = await this.accessOf(user.tenantId, user.tenant.settings, user.role);
+    if (access.mode === 'suspended') {
+      throw new ForbiddenException({ message: accessMessage(access), code: SUSPENDED_CODE });
     }
 
     const refreshToken = await this.sessions.rotate(session, session.mfaVerified, ctx);
@@ -319,6 +318,7 @@ export class AuthService {
       user.name,
       refreshToken,
       session.familyId,
+      access,
     );
   }
 
@@ -341,6 +341,7 @@ export class AuthService {
       where: { id: authUser.sub, tenantId: authUser.tenantId },
       include: { tenant: true, outlets: { include: { outlet: true } } },
     });
+    const access = await this.accessOf(user.tenantId, user.tenant.settings, user.role);
     return {
       id: user.id,
       name: user.name,
@@ -354,6 +355,8 @@ export class AuthService {
         industryTemplate: user.tenant.industryTemplate,
         subscriptionPlan: user.tenant.subscriptionPlan,
       },
+      // Keadaan akses (penuh / baca saja / ditangguhkan) dan tanggal berakhir untuk banner di klien.
+      access: accessPayload(access),
       outlets: user.outlets.map((uo) => ({ id: uo.outlet.id, name: uo.outlet.name })),
     };
   }
@@ -434,6 +437,7 @@ export class AuthService {
     plan: string,
     displayName: string,
     session: { mfaVerified: boolean; ctx?: SessionContext },
+    access?: AccessInfo,
   ) {
     const started = await this.sessions.start({
       tenantId: user.tenantId,
@@ -441,7 +445,18 @@ export class AuthService {
       mfaVerified: session.mfaVerified,
       ctx: session.ctx,
     });
-    return this.buildTokens(user, tenantName, plan, displayName, started.token, started.familyId);
+    return this.buildTokens(user, tenantName, plan, displayName, started.token, started.familyId, access);
+  }
+
+  /** Keadaan akses tenant (penuh / baca saja / ditangguhkan). Superadmin platform tidak pernah dibatasi. */
+  private async accessOf(tenantId: string, settings: unknown, role: string): Promise<AccessInfo> {
+    if (role === 'superadmin') return accessFor({ subscription: null });
+    const subscription = await this.prisma.subscription.findFirst({
+      where: { tenantId },
+      orderBy: { startedAt: 'desc' },
+      select: { status: true, endsAt: true },
+    });
+    return accessFor({ tenantStatus: tenantStatusOf(settings), subscription });
   }
 
   private async buildTokens(
@@ -451,6 +466,7 @@ export class AuthService {
     displayName: string,
     refreshToken: string,
     familyId: string,
+    access?: AccessInfo,
   ) {
     const accessToken = await this.jwt.signAsync(
       {
@@ -476,6 +492,7 @@ export class AuthService {
         tenantName,
         plan,
       },
+      ...(access ? { access: accessPayload(access) } : {}),
     };
   }
 }

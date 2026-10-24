@@ -11,6 +11,15 @@ import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../prisma.service';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 import type { Permission } from '../rbac/permissions';
+import {
+  READ_ONLY_CODE,
+  SUSPENDED_CODE,
+  accessFor,
+  accessMessage,
+  isReadOnlyExempt,
+  isWriteMethod,
+  tenantStatusOf,
+} from '../subscription/access-state';
 
 // Guard global RBAC: membaca @RequirePermissions('...') lalu cek role + override per-user.
 @Injectable()
@@ -42,6 +51,13 @@ export class PermissionsGuard implements CanActivate {
             permissions: { select: { permissionKey: true, effect: true } },
           },
         },
+        // Status tenant dan langganan terbaru untuk keadaan akses (baca saja / ditangguhkan), satu kueri.
+        tenant: {
+          select: {
+            settings: true,
+            subscriptions: { orderBy: { startedAt: 'desc' }, take: 1, select: { status: true, endsAt: true } },
+          },
+        },
       },
     });
     if (!dbUser || !dbUser.isActive) {
@@ -60,6 +76,21 @@ export class PermissionsGuard implements CanActivate {
     // Role di JWT bisa basi sampai 15 menit setelah diubah; pakai role dari DB
     // supaya pemeriksaan di service (canAssignRole, dsb.) selalu memakai role terkini.
     user.role = dbUser.role;
+
+    // Keadaan akun: ditangguhkan = tolak semua; trial/langganan berakhir = baca saja. Superadmin platform
+    // tidak pernah dikunci. Dicek sebelum izin peran dan berlaku juga di rute tanpa @RequirePermissions.
+    if (dbUser.role !== 'superadmin') {
+      const access = accessFor({
+        tenantStatus: tenantStatusOf(dbUser.tenant?.settings),
+        subscription: dbUser.tenant?.subscriptions[0] ?? null,
+      });
+      if (access.mode === 'suspended') {
+        throw new ForbiddenException({ message: accessMessage(access), code: SUSPENDED_CODE });
+      }
+      if (access.mode === 'read_only' && isWriteMethod(req.method) && !isReadOnlyExempt(req.originalUrl ?? req.url ?? '')) {
+        throw new ForbiddenException({ message: accessMessage(access), code: READ_ONLY_CODE });
+      }
+    }
 
     const required = this.reflector.getAllAndOverride<Permission[]>(PERMISSIONS_KEY, [
       ctx.getHandler(),
