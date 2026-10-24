@@ -1,3 +1,5 @@
+import { planConfigProblems } from './plans.config';
+
 type EnvConfig = Record<string, string | undefined>;
 
 const PLACEHOLDER_MARKERS = ['ganti-dengan', 'changeme', 'your-secret', 'secret123'];
@@ -70,6 +72,9 @@ export function validateConfig(config: EnvConfig): EnvConfig {
   if (!Number.isFinite(ttl) || ttl < 0) {
     errors.push('AI_CACHE_TTL_SECONDS harus berupa angka non-negatif');
   }
+
+  // Lama trial dan kuota AI per paket (opsional; bila kosong memakai bawaan di plans.config).
+  errors.push(...planConfigProblems(config));
 
   // CORS: dengan credentials:true, wildcard tidak boleh dipakai; di produksi origin wajib eksplisit.
   const isProduction = config.NODE_ENV === 'production';

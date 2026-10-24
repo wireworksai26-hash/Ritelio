@@ -59,3 +59,16 @@ describe('resolveCorsOrigins (default domain Railway)', () => {
     expect(() => validateConfig({ ...base, NODE_ENV: 'production' })).toThrow(/CORS_ORIGIN wajib/);
   });
 });
+
+describe('validateConfig lama trial dan kuota AI', () => {
+  it('tidak diisi atau berisi bilangan bulat yang sah: lolos', () => {
+    expect(() => validateConfig({ ...base })).not.toThrow();
+    expect(() => validateConfig({ ...base, TRIAL_DAYS: '30', TRIAL_AI_QUOTA: '0', AI_QUOTA_PLUS_AI: '1500' })).not.toThrow();
+  });
+
+  it('menolak nilai yang bukan bilangan bulat sah dan menyebut nama variabelnya', () => {
+    expect(() => validateConfig({ ...base, TRIAL_DAYS: '0' })).toThrow(/TRIAL_DAYS/);
+    expect(() => validateConfig({ ...base, TRIAL_AI_QUOTA: '-1' })).toThrow(/TRIAL_AI_QUOTA/);
+    expect(() => validateConfig({ ...base, AI_QUOTA_CUSTOM: 'tak terbatas' })).toThrow(/AI_QUOTA_CUSTOM/);
+  });
+});

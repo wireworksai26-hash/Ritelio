@@ -1,10 +1,11 @@
+import { paidAiQuotaFor, type PlanKey } from '../../common/config/plans.config';
 import type { UpdateSuperadminTenantDto } from './dto/superadmin.dto';
 
-export type PlanKey = 'basic' | 'plus_ai' | 'custom';
+export type { PlanKey };
 
 /** Kuota AI bulanan bawaan per paket, dipakai saat membuat tenant dan saat paket diganti dari panel. */
 export function defaultAiQuotaFor(plan: PlanKey): number {
-  return plan === 'basic' ? 0 : plan === 'plus_ai' ? 3000 : 25000;
+  return paidAiQuotaFor(plan);
 }
 
 export interface SubscriptionChange {

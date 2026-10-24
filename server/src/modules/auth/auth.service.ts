@@ -8,6 +8,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { authenticator } from 'otplib';
 import { PrismaService } from '../../common/prisma.service';
+import { trialAiQuota, trialEndsAt } from '../../common/config/plans.config';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import { ensureFiscalCalendar } from '../../common/utils/fiscal-calendar';
@@ -101,7 +102,7 @@ export class AuthService {
     if (existing) throw new ConflictException('Email sudah terdaftar. Silakan login.');
 
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
-    const trialEnds = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    const trialEnds = trialEndsAt();
 
     const tenant = await this.prisma.$transaction(async (tx) => {
       await tx.currency.upsert({
@@ -114,7 +115,7 @@ export class AuthService {
         data: {
           name: dto.businessName,
           industryTemplate: dto.industryTemplate,
-          subscriptionPlan: 'plus_ai', // trial 14 hari
+          subscriptionPlan: 'plus_ai', // trial; lama dan kuota AI dari plans.config (TRIAL_DAYS, TRIAL_AI_QUOTA)
         },
       });
 
@@ -135,7 +136,7 @@ export class AuthService {
           tenantId: t.id,
           plan: 'plus_ai',
           status: 'trialing',
-          aiQuota: 1000,
+          aiQuota: trialAiQuota(),
           endsAt: trialEnds,
         },
       });

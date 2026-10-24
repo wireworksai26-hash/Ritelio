@@ -22,6 +22,7 @@ import type {
   UpdateSuperadminTenantDto,
   UpdateSuperadminUserDto,
 } from './dto/superadmin.dto';
+import { trialEndsAt } from '../../common/config/plans.config';
 import { defaultAiQuotaFor, subscriptionChangeFor } from './subscription-sync';
 import { platformOnlyFieldsIn } from './tenant-change-policy';
 
@@ -248,8 +249,7 @@ export class SuperadminService {
       await ensureFiscalCalendar(tx, tenant.id, company.id, new Date().getUTCFullYear());
       await ensureTenantRoles(tx, tenant.id);
 
-      const trialEnds = new Date();
-      trialEnds.setUTCDate(trialEnds.getUTCDate() + 14);
+      const trialEnds = trialEndsAt();
       await tx.subscription.create({
         data: {
           tenantId: tenant.id,

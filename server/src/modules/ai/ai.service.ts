@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma.service';
+import { paidAiQuotaFor } from '../../common/config/plans.config';
 import type { AuthUser } from '../../common/decorators/current-user.decorator';
 import { AiRouterService } from './ai-router.service';
 import { FastPathService } from './fast-path.service';
@@ -38,7 +39,7 @@ export class AiService {
     // Trial yang sudah lewat tanggalnya tidak lagi memberi kuota.
     if (sub && sub.endsAt && sub.endsAt.getTime() < Date.now()) return 0;
     if (sub) return sub.aiQuota;
-    return tenant.subscriptionPlan === 'plus_ai' ? 1000 : 0;
+    return tenant.subscriptionPlan === 'plus_ai' ? paidAiQuotaFor('plus_ai') : 0;
   }
 
   private async usage(tenantId: string): Promise<number> {
