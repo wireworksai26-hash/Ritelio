@@ -67,6 +67,50 @@ describe('SuperadminService', () => {
     expect(prisma.aiUsageCounter.upsert).toHaveBeenCalledTimes(1);
   });
 
+  describe('pembatasan kolom paket, status, dan kuota (hanya superadmin platform)', () => {
+    const owner = { sub: 'u-owner', tenantId: 'tenant-1', role: 'owner', email: 'o@test.id' };
+    const admin = { sub: 'u-admin', tenantId: 'tenant-1', role: 'admin', email: 'a@test.id' };
+
+    it.each([
+      ['subscriptionPlan', { subscriptionPlan: 'custom' }],
+      ['status', { status: 'active' }],
+      ['aiQuotaLimit', { aiQuotaLimit: 999999 }],
+      ['monthlyRevenue', { monthlyRevenue: 1 }],
+      ['resetAiQuota', { resetAiQuota: true }],
+    ])('menolak owner dan admin mengubah %s tenant sendiri', async (field, dto) => {
+      for (const actor of [owner, admin]) {
+        const { service, prisma } = createMocks();
+        await expect(service.updateTenant('tenant-1', 'tenant-1', actor as any, dto as any)).rejects.toThrow(
+          ForbiddenException,
+        );
+        await expect(service.updateTenant('tenant-1', 'tenant-1', actor as any, dto as any)).rejects.toThrow(
+          new RegExp(field),
+        );
+        expect(prisma.tenant.update).not.toHaveBeenCalled();
+      }
+    });
+
+    it('tetap mengizinkan owner mengubah nama dan template usaha tenant sendiri', async () => {
+      const { service, prisma } = createMocks();
+      const res = await service.updateTenant('tenant-1', 'tenant-1', owner as any, {
+        name: 'Nama Baru',
+        industryTemplate: 'retail',
+      });
+      expect(res.ok).toBe(true);
+      expect(prisma.tenant.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('menolak owner dan admin membuat tenant baru (hanya superadmin)', async () => {
+      for (const actor of [owner, admin]) {
+        const { service, prisma } = createMocks();
+        await expect(
+          service.createTenant('tenant-1', actor as any, { name: 'Tenant Siluman', industryTemplate: 'retail', subscriptionPlan: 'custom' } as any),
+        ).rejects.toThrow(ForbiddenException);
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+      }
+    });
+  });
+
   it('mencabut seluruh sesi refresh token saat revokeUserSessions dipanggil superadmin', async () => {
     const { service, prisma, sessions } = createMocks();
     prisma.user.findFirst.mockResolvedValue({

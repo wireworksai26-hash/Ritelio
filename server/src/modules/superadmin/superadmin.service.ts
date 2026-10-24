@@ -22,6 +22,7 @@ import type {
   UpdateSuperadminTenantDto,
   UpdateSuperadminUserDto,
 } from './dto/superadmin.dto';
+import { platformOnlyFieldsIn } from './tenant-change-policy';
 
 const DEFAULT_MODULES = [
   { key: 'inventory', label: 'Inventori', description: 'Stok, gudang, stok opname' },
@@ -194,8 +195,10 @@ export class SuperadminService {
   }
 
   async createTenant(callerTenantId: string, actor: AuthUser, dto: CreateSuperadminTenantDto) {
-    if (actor.role !== 'superadmin' && actor.role !== 'owner' && actor.role !== 'admin') {
-      throw new ForbiddenException('Akses ditolak.');
+    // Tenant baru lengkap dengan paket dan kuota AI-nya hanya boleh dibuat superadmin platform. Sebelumnya owner
+    // dan admin pun boleh, sehingga tenant bisa dibuat sebanyak-banyaknya dengan paket custom (AI tak terbatas).
+    if (actor.role !== 'superadmin') {
+      throw new ForbiddenException('Hanya superadmin platform yang dapat membuat tenant baru.');
     }
     const plan = dto.subscriptionPlan ?? 'plus_ai';
     const defaultQuota = plan === 'basic' ? 0 : plan === 'plus_ai' ? 3000 : 25000;
@@ -313,6 +316,12 @@ export class SuperadminService {
     const isSuperadmin = actor.role === 'superadmin';
     if (!isSuperadmin && id !== callerTenantId) {
       throw new NotFoundException('Tenant tidak ditemukan.');
+    }
+    if (!isSuperadmin) {
+      const platformOnly = platformOnlyFieldsIn(dto);
+      if (platformOnly.length > 0) {
+        throw new ForbiddenException(`Hanya superadmin platform yang dapat mengubah ${platformOnly.join(', ')}.`);
+      }
     }
 
     const existing = await this.prisma.tenant.findUnique({ where: { id } });
