@@ -4,7 +4,7 @@ import { Icon, type IconName } from '../icons/Icon';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 
-interface ErpModule {
+export interface ErpModule {
   icon: IconName;
   title: string;
   summary: string;
@@ -12,7 +12,7 @@ interface ErpModule {
 }
 
 // Hanya fitur yang sudah ada di aplikasi. Tambahkan baris di sini setelah fiturnya benar-benar rilis.
-const MODULES: ErpModule[] = [
+export const MODULES: ErpModule[] = [
   {
     icon: 'finance',
     title: 'Keuangan & Akuntansi',

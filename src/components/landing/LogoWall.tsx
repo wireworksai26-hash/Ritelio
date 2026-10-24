@@ -2,7 +2,7 @@ import { Reveal } from '../Reveal';
 
 // Jenis usaha yang dirancang untuk didukung. Bukan daftar pelanggan: ganti dengan logo
 // pelanggan sungguhan (dengan izin mereka) bila sudah ada.
-const NAMES = [
+export const NAMES = [
   'Toko Retail', 'Kafe & Restoran', 'Bakery', 'Manufaktur Kecil', 'Distributor',
   'Jasa & Proyek', 'Apotek', 'Laundry', 'Bengkel', 'Toko Online',
 ];

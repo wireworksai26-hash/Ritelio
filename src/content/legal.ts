@@ -8,11 +8,19 @@ import type { LegalContact } from '../config/legal';
 /** Tanggal berlaku naskah. Ubah setiap isi naskah berubah. */
 export const LEGAL_EFFECTIVE_DATE = '25 Oktober 2026';
 
+/** Tautan pada akhir bagian: `to` untuk halaman di dalam aplikasi, `href` untuk alamat luar atau anchor. */
+export interface SectionLink {
+  label: string;
+  to?: string;
+  href?: string;
+}
+
 export interface LegalSection {
   id: string;
   heading: string;
   paragraphs?: string[];
   bullets?: string[];
+  links?: SectionLink[];
 }
 
 export interface LegalDocument {

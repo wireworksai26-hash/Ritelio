@@ -100,7 +100,7 @@ function ExplainableAiVisual() {
   );
 }
 
-interface Value {
+export interface Value {
   id: string;
   label: string;
   sub: string;
@@ -110,7 +110,7 @@ interface Value {
   visual: ReactNode;
 }
 
-const VALUES: Value[] = [
+export const VALUES: Value[] = [
   {
     id: 'peran',
     label: 'Per Peran',

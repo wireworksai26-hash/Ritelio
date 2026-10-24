@@ -3,7 +3,7 @@ import { Reveal } from '../Reveal';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 
-const ITEMS = [
+export const TRUST_ITEMS = [
   {
     eyebrow: 'AKSES PER PERAN',
     body: 'Hak akses dijaga di server per peran dan per izin. Kasir tidak bisa membuka keuangan, walau mengetik alamatnya langsung.',
@@ -49,7 +49,7 @@ export function TrustSecurity() {
           </div>
         </Reveal>
         <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {ITEMS.map((item, i) => (
+          {TRUST_ITEMS.map((item, i) => (
             <Reveal key={item.eyebrow} delay={i * 0.04}>
               <Card className="p-6 h-full">
                 <p className="flex items-center gap-2 text-caption text-fossil">

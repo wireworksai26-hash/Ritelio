@@ -19,6 +19,7 @@ import type { Role } from './types';
 // walau modul ERP bertambah banyak — penting untuk HP dengan koneksi lemah.
 // Halaman hukum publik: dimuat saat dibuka saja, tidak menambah bundle awal.
 const Legal = lazy(() => import('./pages/Legal'));
+const Info = lazy(() => import('./pages/Info'));
 const Finance = lazy(() => import('./pages/Finance'));
 const Inventory = lazy(() => import('./pages/Inventory'));
 const Notifications = lazy(() => import('./pages/Notifications'));
@@ -159,6 +160,11 @@ export default function App() {
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/syarat-ketentuan" element={<Suspense fallback={null}><Legal kind="terms" /></Suspense>} />
         <Route path="/privasi" element={<Suspense fallback={null}><Legal kind="privacy" /></Suspense>} />
+        <Route path="/tentang" element={<Suspense fallback={null}><Info kind="about" /></Suspense>} />
+        <Route path="/panduan" element={<Suspense fallback={null}><Info kind="guide" /></Suspense>} />
+        <Route path="/template" element={<Suspense fallback={null}><Info kind="templates" /></Suspense>} />
+        <Route path="/bantuan" element={<Suspense fallback={null}><Info kind="help" /></Suspense>} />
+        <Route path="/status" element={<Suspense fallback={null}><Info kind="status" /></Suspense>} />
         <Route path="/app" element={<RequireAuth>{<AppShell />}</RequireAuth>}>
           <Route index element={<Home />} />
           <Route path="superadmin" element={<Guarded path="/app/superadmin"><Superadmin /></Guarded>} />

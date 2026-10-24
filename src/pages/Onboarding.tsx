@@ -18,17 +18,14 @@ import { useBusinessStore } from '../stores/businessStore';
 import { useModuleStore } from '../stores/moduleStore';
 import { useOutletStore } from '../stores/outletStore';
 import { toast } from '../stores/toastStore';
+import { INDUSTRY_TEMPLATES } from '../config/industryTemplates';
 import { plans } from '../data/plans';
 import { formatIDR } from '../lib/format';
 import type { IndustryTemplate, SubscriptionPlan, User } from '../types';
 
 const TOTAL_STEPS = 6;
 
-const templates: { key: IndustryTemplate; icon: IconName; title: string; desc: string }[] = [
-  { key: 'retail', icon: 'store', title: 'Retail', desc: 'Inventori + POS + Keuangan' },
-  { key: 'manufacturing', icon: 'layers', title: 'Manufaktur', desc: 'Inventori + Produksi + Keuangan' },
-  { key: 'services', icon: 'calendar', title: 'Jasa', desc: 'Booking + POS + Keuangan' },
-];
+const templates = INDUSTRY_TEMPLATES;
 
 const installBenefits = [
   'Bekerja offline, sinkron otomatis',

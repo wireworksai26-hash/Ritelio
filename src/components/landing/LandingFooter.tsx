@@ -8,9 +8,27 @@ import { Card } from '../ui/Card';
 
 const GREETING = 'Halo Tim Retalio, saya ingin konsultasi tentang Retalio.';
 
-// Setiap tautan wajib punya tujuan (href tidak opsional): menu yang belum punya halaman atau bagian tujuan
-// tidak dipasang, supaya tidak ada tautan mati di footer. Tambahkan lagi saat tujuannya ada.
-const COLUMNS: Array<{ title: string; links: Array<{ label: string; href: string }> }> = [
+// Setiap menu footer punya tujuan: `href` untuk bagian halaman depan ('#...') atau halaman ('/...'), atau `soon`
+// untuk menu yang halamannya belum bisa diisi dengan data yang ada. Menu `soon` tetap tampil dan memberi keterangan
+// saat diklik, bukan tautan kosong. Ganti ke `href` begitu halamannya tersedia.
+type FooterLink = { label: string; href: string } | { label: string; soon: { title: string; description: string } };
+
+const COLUMNS: Array<{ title: string; links: FooterLink[] }> = [
+  {
+    title: 'PERUSAHAAN',
+    links: [
+      { label: 'Tentang', href: '/tentang' },
+      {
+        label: 'Blog',
+        soon: { title: 'Blog belum tersedia', description: 'Belum ada artikel yang diterbitkan. Ada yang ingin ditanyakan? Hubungi tim kami lewat bagian Kontak.' },
+      },
+      {
+        label: 'Karier',
+        soon: { title: 'Halaman karier belum dibuka', description: 'Belum ada informasi lowongan di situs ini. Untuk pertanyaan, hubungi tim kami lewat bagian Kontak.' },
+      },
+      { label: 'Kontak', href: '#kontak' },
+    ],
+  },
   {
     title: 'PRODUK',
     links: [
@@ -22,6 +40,15 @@ const COLUMNS: Array<{ title: string; links: Array<{ label: string; href: string
     ],
   },
   {
+    title: 'SUMBER DAYA',
+    links: [
+      { label: 'Panduan', href: '/panduan' },
+      { label: 'Template', href: '/template' },
+      { label: 'Bantuan', href: '/bantuan' },
+      { label: 'Status', href: '/status' },
+    ],
+  },
+  {
     title: 'SOLUSI',
     links: [
       { label: 'Retail & F&B', href: '#solusi' },
@@ -29,14 +56,32 @@ const COLUMNS: Array<{ title: string; links: Array<{ label: string; href: string
       { label: 'Jasa', href: '#solusi' },
     ],
   },
-  {
-    title: 'PERUSAHAAN',
-    links: [
-      { label: 'Kontak', href: '#kontak' },
-      { label: 'Keamanan', href: '#keamanan' },
-    ],
-  },
 ];
+
+const linkClass = 'text-[15px] text-smoke hover:text-ink transition-colors';
+
+function FooterMenuLink({ link }: { link: FooterLink }) {
+  if ('soon' in link) {
+    const { soon } = link;
+    return (
+      <button type="button" className={`${linkClass} text-left`} onClick={() => toast({ title: soon.title, description: soon.description, icon: 'warning' })}>
+        {link.label}
+      </button>
+    );
+  }
+  if (link.href.startsWith('/')) {
+    return (
+      <Link to={link.href} className={linkClass}>
+        {link.label}
+      </Link>
+    );
+  }
+  return (
+    <a href={link.href} className={linkClass}>
+      {link.label}
+    </a>
+  );
+}
 
 export function LandingFooter() {
   const [email, setEmail] = useState('');
@@ -53,16 +98,14 @@ export function LandingFooter() {
     <footer className="border-t border-ash">
       <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8 pt-16">
         <div className="grid gap-12 lg:grid-cols-[1fr_340px]">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-8">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-8">
             {COLUMNS.map((col) => (
               <div key={col.title}>
                 <p className="text-caption text-fossil">{col.title}</p>
                 <ul className="mt-3 space-y-2.5">
                   {col.links.map((l) => (
                     <li key={l.label}>
-                      <a href={l.href} className="text-[15px] text-smoke hover:text-ink transition-colors">
-                        {l.label}
-                      </a>
+                      <FooterMenuLink link={l} />
                     </li>
                   ))}
                 </ul>
@@ -133,7 +176,9 @@ export function LandingFooter() {
           <span className="flex flex-wrap gap-x-5 gap-y-1">
             <Link to="/privasi" className="hover:text-ink transition-colors">Privasi</Link>
             <Link to="/syarat-ketentuan" className="hover:text-ink transition-colors">Syarat &amp; Ketentuan</Link>
-            <a href="#keamanan" className="hover:text-ink transition-colors">Keamanan</a>          </span>
+            <a href="#keamanan" className="hover:text-ink transition-colors">Keamanan</a>
+            <Link to="/status" className="hover:text-ink transition-colors">Status</Link>
+          </span>
         </div>
       </div>
     </footer>
