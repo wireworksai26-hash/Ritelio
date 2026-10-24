@@ -29,6 +29,15 @@ const MAX_TEXT = 4000;
 const MAX_CHOICES = 30;
 const MAX_CHOICE = 300;
 const MAX_ID = 200;
+/** Batas yang bisa dilonggarkan per formulir; bawaannya untuk formulir konsultasi singkat. */
+export interface IntakeLimits {
+  maxAnswers?: number;
+  maxText?: number;
+}
+
+/** Formulir data awal klien berisi daftar panjang (produk, supplier, dsb.) yang ditempel sebagai satu jawaban. */
+export const ONBOARDING_LIMITS: IntakeLimits = { maxAnswers: 80, maxText: 30_000 };
+
 const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 
 function text(value: unknown, max: number, label: string): string {
@@ -44,7 +53,9 @@ function text(value: unknown, max: number, label: string): string {
  * { responseId, formId?, submittedAt?, answers: [{ question, answer }] }, dengan answer berupa teks
  * atau daftar teks (kotak centang). Jawaban kosong dibuang; pertanyaan tanpa judul ditolak.
  */
-export function parseIntakePayload(raw: unknown, now: Date = new Date()): IntakePayload {
+export function parseIntakePayload(raw: unknown, now: Date = new Date(), limits: IntakeLimits = {}): IntakePayload {
+  const maxAnswers = limits.maxAnswers ?? MAX_ANSWERS;
+  const maxText = limits.maxText ?? MAX_TEXT;
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new BadRequestException('Isi permintaan harus berupa objek JSON.');
   }
@@ -64,8 +75,8 @@ export function parseIntakePayload(raw: unknown, now: Date = new Date()): Intake
   if (!Array.isArray(body.answers) || body.answers.length === 0) {
     throw new BadRequestException('answers wajib berisi minimal satu jawaban.');
   }
-  if (body.answers.length > MAX_ANSWERS) {
-    throw new BadRequestException(`Terlalu banyak jawaban (maksimal ${MAX_ANSWERS}).`);
+  if (body.answers.length > maxAnswers) {
+    throw new BadRequestException(`Terlalu banyak jawaban (maksimal ${maxAnswers}).`);
   }
 
   const answers: IntakeAnswer[] = [];
@@ -85,7 +96,7 @@ export function parseIntakePayload(raw: unknown, now: Date = new Date()): Intake
     } else if (entry.answer === undefined || entry.answer === null) {
       continue;
     } else {
-      answer = text(entry.answer, MAX_TEXT, 'answer');
+      answer = text(entry.answer, maxText, 'answer');
       if (!answer) continue;
     }
     answers.push({ question, answer });

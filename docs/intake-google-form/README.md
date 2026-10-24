@@ -55,3 +55,31 @@ belum ada isinya; tautkan ke sana setelah halamannya dibuat.
 - Kiriman ulang dengan `responseId` yang sama tidak membuat baris baru.
 - Batas ukuran dan jumlah jawaban; maksimal 30 permintaan per menit per alamat.
 - Hanya superadmin yang dapat melihat dan mengubah pengajuan.
+
+---
+
+# Formulir 2: data awal klien (setelah berlangganan)
+
+Alur: klien membayar → menerima tautan Google Form 2 → mengisi data usahanya (outlet, produk dan harga, stok awal,
+karyawan, supplier dan pelanggan, saldo awal, pajak, metode pembayaran) → Apps Script mengirim ke Retalio →
+tim melihatnya di **Panel Superadmin → Data Awal Klien**.
+
+**Tahap ini hanya menerima dan menampilkan.** Tidak ada AI dan tidak ada data yang otomatis masuk ke akun klien.
+Tim memasukkannya secara manual setelah meninjau; memasukkan otomatis (dengan persetujuan klien) adalah tahap berikutnya.
+Email yang diisi klien dicocokkan dengan akun Retalio sebagai **petunjuk** untuk tim (bukan dasar akses apa pun).
+
+## Pasang (sekali)
+
+1. Buat Google Form kosong **baru** (terpisah dari form konsultasi) → ⋮ → **Apps Script**.
+2. Buat dua file di proyek itu: tempel `build-form-2.gs` lalu jalankan `buildOnboardingForm` sekali untuk mengisi pertanyaan;
+   tempel `apps-script.gs` untuk pengiriman jawaban.
+3. **Project Settings → Script Properties**:
+   - `RETALIO_INTAKE_URL` = `https://<alamat-retalio>/v1/intake/onboarding-form` (perhatikan ujungnya `onboarding-form`,
+     bukan `google-form`)
+   - `RETALIO_INTAKE_SECRET` = nilai `INTAKE_WEBHOOK_SECRET` (sama dengan form konsultasi)
+4. Jalankan `setupTrigger` sekali, lalu `testSend` (muncul sebagai "Uji Koneksi" di tab Data Awal Klien; tandai Selesai).
+5. Kirim tautan form ini ke klien setelah pembayaran terkonfirmasi.
+
+Ketentuan: judul "Nama Lengkap", "Nomor WhatsApp Aktif", dan "Email Akun Retalio" dibaca otomatis; jangan diubah.
+Satu jawaban dapat berisi hingga 30.000 karakter dan satu kiriman hingga 80 pertanyaan.
+Data karyawan dan pelanggan adalah data pribadi: sampaikan di S&K/Privasi bahwa data itu dipakai hanya untuk menyiapkan akun.

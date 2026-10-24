@@ -3045,3 +3045,29 @@ model IntakeSubmission {
   @@index([createdAt])
   @@map("intake_submissions")
 }
+
+/// Data awal klien dari Google Form 2 (diisi setelah klien berlangganan), dikirim lewat webhook bertanda tangan yang sama
+/// dengan pengajuan calon klien. Data tingkat platform: hanya superadmin yang dapat membacanya. `tenantId` hanya petunjuk
+/// hasil pencocokan email akun (tanpa relasi), supaya tabel ini tidak menyentuh data tenant mana pun.
+model OnboardingSubmission {
+  id           String   @id @default(uuid())
+  /// ID respons dari Google. Unik, supaya pengiriman ulang (retry skrip) tidak membuat data ganda.
+  externalId   String   @unique @map("external_id")
+  formId       String?  @map("form_id")
+  submittedAt  DateTime @map("submitted_at")
+  contactName  String?  @map("contact_name")
+  contactEmail String?  @map("contact_email")
+  contactPhone String?  @map("contact_phone")
+  tenantId     String?  @map("tenant_id")
+  /// [{ question: string, answer: string | string[] }]
+  answers      Json
+  /// new | in_progress | done
+  status       String   @default("new")
+  notes        String   @default("")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@map("onboarding_submissions")
+}
