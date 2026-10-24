@@ -25,14 +25,15 @@ nomor/email yang terselip di teks bebas disamarkan lebih dulu.
 
 ## Pertanyaan yang disarankan (khusus Retalio)
 
-Judul pertanyaan dibaca otomatis untuk mengisi kolom daftar, jadi pertahankan kata kuncinya:
+Judul pertanyaan dibaca otomatis untuk mengisi kolom daftar, jadi pertahankan kata kuncinya. Tidak perlu membuatnya satu per satu: tempel `build-form.gs` di Editor skrip form yang masih kosong dan jalankan `buildForm` sekali (menjalankan ulang menghapus dan membuat ulang pertanyaan).
+
+"Nama Usaha" sengaja tidak ditanyakan karena judulnya tidak dikenali sebagai data identitas, sehingga isinya ikut dikirim ke model AI. Sales menanyakannya saat konsultasi.
 
 | Judul pertanyaan | Jenis | Dipakai untuk |
 |---|---|---|
 | Nama Lengkap | Jawaban singkat | nama kontak |
 | Nomor WhatsApp Aktif | Jawaban singkat | tombol WhatsApp |
 | Alamat Email Aktif | Jawaban singkat | tombol email |
-| Nama Usaha | Jawaban singkat | analisis |
 | Jenis Usaha / Industri | Pilihan | jenis usaha |
 | Jumlah Karyawan | Pilihan | skala usaha |
 | Jumlah Outlet/Cabang | Pilihan | analisis |
