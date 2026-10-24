@@ -1,4 +1,4 @@
-import { SALES_EMAIL, SALES_WHATSAPP_DISPLAY, salesMailtoUrl, salesWhatsAppUrl } from '../../config/contact';
+import { INTAKE_FORM_URL, SALES_EMAIL, SALES_WHATSAPP_DISPLAY, salesMailtoUrl, salesWhatsAppUrl } from '../../config/contact';
 import { useContactSalesStore } from '../../stores/contactSalesStore';
 import { Icon } from '../icons/Icon';
 import { Modal } from '../ui/Modal';
@@ -23,13 +23,25 @@ export function ContactSalesModal() {
         Ceritakan kebutuhan usahamu. Tim sales membantu memilih paket yang cocok dan menjawab pertanyaanmu.
       </p>
       <div className="mt-5 space-y-2.5">
+        {INTAKE_FORM_URL && (
+          <a
+            href={INTAKE_FORM_URL}
+            target="_blank"
+            rel="noreferrer"
+            onClick={close}
+            className={`${actionClass} bg-chartreuse text-[#1c1c1c] hover:brightness-95`}
+          >
+            <Icon name="document" size={17} />
+            Isi formulir konsultasi
+          </a>
+        )}
         {whatsapp && (
           <a
             href={whatsapp}
             target="_blank"
             rel="noreferrer"
             onClick={close}
-            className={`${actionClass} bg-ink text-paper hover:bg-ink/90`}
+            className={`${actionClass} ${INTAKE_FORM_URL ? 'border border-ash bg-paper text-ink hover:bg-sand' : 'bg-ink text-paper hover:bg-ink/90'}`}
           >
             <Icon name="chat" size={17} />
             Chat WhatsApp {SALES_WHATSAPP_DISPLAY}
@@ -38,7 +50,7 @@ export function ContactSalesModal() {
         <a
           href={salesMailtoUrl(topic ? `Konsultasi ${topic}` : 'Konsultasi Retalio', message)}
           onClick={close}
-          className={`${actionClass} ${whatsapp ? 'border border-ash bg-paper text-ink hover:bg-sand' : 'bg-ink text-paper hover:bg-ink/90'}`}
+          className={`${actionClass} ${whatsapp || INTAKE_FORM_URL ? 'border border-ash bg-paper text-ink hover:bg-sand' : 'bg-ink text-paper hover:bg-ink/90'}`}
         >
           <Icon name="mail" size={17} />
           Email {SALES_EMAIL}

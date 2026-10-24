@@ -1,4 +1,4 @@
-import { SALES_EMAIL, SALES_WHATSAPP_DISPLAY, salesMailtoUrl, salesWhatsAppUrl } from '../../config/contact';
+import { INTAKE_FORM_URL, SALES_EMAIL, SALES_WHATSAPP_DISPLAY, salesMailtoUrl, salesWhatsAppUrl } from '../../config/contact';
 import { Icon } from '../icons/Icon';
 
 const GREETING = 'Halo Tim Retalio, saya ingin konsultasi tentang Retalio.';
@@ -14,6 +14,12 @@ export function SalesContactBar() {
         <span className="hidden sm:inline">Mau konsultasi dulu? Hubungi sales Retalio:</span>
         <span className="sm:hidden">Konsultasi dengan sales:</span>
         <span className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+          {INTAKE_FORM_URL && (
+            <a href={INTAKE_FORM_URL} target="_blank" rel="noreferrer" className={linkClass}>
+              <Icon name="document" size={15} />
+              Isi formulir
+            </a>
+          )}
           {whatsapp && (
             <a href={whatsapp} target="_blank" rel="noreferrer" className={linkClass}>
               <Icon name="chat" size={15} />

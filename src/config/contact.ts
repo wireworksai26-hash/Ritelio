@@ -26,6 +26,21 @@ export function buildMailtoUrl(email: string, subject?: string, body?: string): 
   return `mailto:${email}${params.length > 0 ? `?${params.join('&')}` : ''}`;
 }
 
+/**
+ * Alamat formulir konsultasi (Google Form). Hanya tautan https yang dipakai, supaya nilai salah isi (atau skema
+ * seperti javascript:) tidak pernah menjadi tautan di halaman. Mengembalikan null bila kosong atau tidak valid.
+ */
+export function normalizeFormUrl(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 // Email sales yang sudah dipakai di halaman depan menjadi nilai bawaan, supaya perilaku tidak berubah bila variabel tidak diisi.
 const DEFAULT_SALES_EMAIL = 'sales@retalio.id';
 
@@ -43,3 +58,6 @@ export function salesWhatsAppUrl(message?: string): string | null {
 export function salesMailtoUrl(subject?: string, body?: string): string {
   return buildMailtoUrl(SALES_EMAIL, subject, body);
 }
+
+/** Tautan formulir konsultasi (VITE_INTAKE_FORM_URL), atau null bila belum diatur. */
+export const INTAKE_FORM_URL = normalizeFormUrl(env.VITE_INTAKE_FORM_URL);

@@ -16,7 +16,8 @@ COPY src ./src
 # Kontak sales di halaman depan (opsional). Railway hanya meneruskan variabel service ke build bila dideklarasikan sebagai ARG.
 ARG VITE_SALES_WHATSAPP
 ARG VITE_SALES_EMAIL
-ENV VITE_SALES_WHATSAPP=$VITE_SALES_WHATSAPP VITE_SALES_EMAIL=$VITE_SALES_EMAIL
+ARG VITE_INTAKE_FORM_URL
+ENV VITE_SALES_WHATSAPP=$VITE_SALES_WHATSAPP VITE_SALES_EMAIL=$VITE_SALES_EMAIL VITE_INTAKE_FORM_URL=$VITE_INTAKE_FORM_URL
 RUN npm run build
 
 # ---- 2. Build backend ---------------------------------------------------------------------------

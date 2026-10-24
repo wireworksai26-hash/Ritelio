@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { SALES_EMAIL, SALES_WHATSAPP_DISPLAY, salesMailtoUrl, salesWhatsAppUrl } from '../../config/contact';
+import { INTAKE_FORM_URL, SALES_EMAIL, SALES_WHATSAPP_DISPLAY, salesMailtoUrl, salesWhatsAppUrl } from '../../config/contact';
 import { toast } from '../../stores/toastStore';
 import { Icon } from '../icons/Icon';
 import { Button } from '../ui/Button';
@@ -75,6 +75,12 @@ export function LandingFooter() {
               Bingung memilih paket atau ingin tahu apakah Retalio cocok untuk usahamu? Hubungi tim sales kami.
             </p>
             <div className="mt-4 space-y-2.5 text-[15px]">
+              {INTAKE_FORM_URL && (
+                <a href={INTAKE_FORM_URL} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-ink hover:underline underline-offset-4">
+                  <Icon name="document" size={16} />
+                  Isi formulir &amp; jadwalkan konsultasi
+                </a>
+              )}
               {whatsapp && (
                 <a href={whatsapp} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-ink hover:underline underline-offset-4">
                   <Icon name="chat" size={16} />

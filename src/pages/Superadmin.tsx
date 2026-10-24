@@ -25,6 +25,7 @@ import {
 import { isValidUuid } from '../lib/onesignal';
 import { maskApiKey } from '../lib/security';
 import { AVAILABLE_NIM_MODELS, FALLBACK_OPTIONS, useAiConfigStore } from '../stores/aiConfigStore';
+import { IntakeTab } from '../components/superadmin/IntakeTab';
 import { useAuthStore } from '../stores/authStore';
 import { useBusinessStore } from '../stores/businessStore';
 import { useOneSignalStore, type OneSignalChannels, type PushBroadcastRecord } from '../stores/oneSignalStore';
@@ -89,10 +90,11 @@ interface ApiOverview {
   diagnostics: ApiDiagnostics;
 }
 
-type SuperadminTab = 'tenants' | 'users' | 'push' | 'audit' | 'system';
+type SuperadminTab = 'tenants' | 'intake' | 'users' | 'push' | 'audit' | 'system';
 
 const tabOptions: Array<{ value: SuperadminTab; label: string }> = [
   { value: 'tenants', label: 'Tenant & Institusi' },
+  { value: 'intake', label: 'Pengajuan Calon Klien' },
   { value: 'users', label: 'Pengguna Global' },
   { value: 'push', label: 'Push & Broadcast' },
   { value: 'audit', label: 'Audit & Keamanan' },
@@ -492,6 +494,9 @@ export default function Superadmin() {
           onAdd={() => setUserModalOpen(true)}
         />
       )}
+
+      {/* Pengajuan calon klien dari Google Form + analisis AI */}
+      {tab === 'intake' && <IntakeTab />}
 
       {/* Tab 3: Push & Broadcast OneSignal */}
       {tab === 'push' && <PushTab tenants={tenants} />}

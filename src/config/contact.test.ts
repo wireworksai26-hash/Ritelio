@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildMailtoUrl, buildWhatsAppUrl, normalizeWhatsAppNumber } from './contact';
+import { buildMailtoUrl, buildWhatsAppUrl, normalizeFormUrl, normalizeWhatsAppNumber } from './contact';
 
 describe('normalizeWhatsAppNumber', () => {
   it('nomor lokal berawalan 0 diubah ke kode negara 62', () => {
@@ -55,5 +55,17 @@ describe('buildMailtoUrl', () => {
 
   it('tanpa subjek dan isi hanya alamatnya', () => {
     expect(buildMailtoUrl('sales@contoh.id')).toBe('mailto:sales@contoh.id');
+  });
+});
+
+describe('normalizeFormUrl', () => {
+  it('menerima tautan https (termasuk Google Form) dan merapikan spasi', () => {
+    expect(normalizeFormUrl('  https://docs.google.com/forms/d/e/ABC/viewform ')).toBe('https://docs.google.com/forms/d/e/ABC/viewform');
+  });
+
+  it('menolak http, skema berbahaya, teks biasa, dan kosong', () => {
+    for (const bad of ['http://docs.google.com/forms/x', 'javascript:alert(1)', 'data:text/html,x', 'docs.google.com/forms', 'bukan url', '', '   ', undefined]) {
+      expect(normalizeFormUrl(bad)).toBeNull();
+    }
   });
 });
