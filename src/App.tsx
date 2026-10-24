@@ -17,6 +17,8 @@ import type { Role } from './types';
 
 // Halaman di dalam /app dimuat saat dibuka saja. Bundle awal PWA tetap kecil
 // walau modul ERP bertambah banyak — penting untuk HP dengan koneksi lemah.
+// Halaman hukum publik: dimuat saat dibuka saja, tidak menambah bundle awal.
+const Legal = lazy(() => import('./pages/Legal'));
 const Finance = lazy(() => import('./pages/Finance'));
 const Inventory = lazy(() => import('./pages/Inventory'));
 const Notifications = lazy(() => import('./pages/Notifications'));
@@ -155,6 +157,8 @@ export default function App() {
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/syarat-ketentuan" element={<Suspense fallback={null}><Legal kind="terms" /></Suspense>} />
+        <Route path="/privasi" element={<Suspense fallback={null}><Legal kind="privacy" /></Suspense>} />
         <Route path="/app" element={<RequireAuth>{<AppShell />}</RequireAuth>}>
           <Route index element={<Home />} />
           <Route path="superadmin" element={<Guarded path="/app/superadmin"><Superadmin /></Guarded>} />

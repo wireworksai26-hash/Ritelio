@@ -45,8 +45,8 @@ Judul pertanyaan dibaca otomatis untuk mengisi kolom daftar, jadi pertahankan ka
 ## Persetujuan data pribadi (UU PDP)
 
 Tambahkan di awal formulir kalimat persetujuan, misalnya: "Data Anda dipakai hanya untuk menghubungi dan menyiapkan
-penawaran Retalio." dan satu pertanyaan kotak centang wajib "Saya setuju". Halaman Privasi dan S&K di footer saat ini
-belum ada isinya; tautkan ke sana setelah halamannya dibuat.
+penawaran Retalio." dan satu pertanyaan kotak centang wajib "Saya setuju". Halaman Kebijakan Privasi (`/privasi`) dan
+Syarat & Ketentuan (`/syarat-ketentuan`) sudah ada; tambahkan alamat lengkapnya (alamat situs + path itu) di deskripsi form.
 
 ## Keamanan penerima
 

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { INTAKE_FORM_URL, SALES_EMAIL, SALES_WHATSAPP_DISPLAY, salesMailtoUrl, salesWhatsAppUrl } from '../../config/contact';
 import { toast } from '../../stores/toastStore';
 import { Icon } from '../icons/Icon';
@@ -129,8 +130,8 @@ export function LandingFooter() {
         <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8 py-5 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-caption text-fossil">
           <span>© 2026 Retalio ERP</span>
           <span className="flex flex-wrap gap-x-5 gap-y-1">
-            <a href="#" onClick={(e) => e.preventDefault()} className="hover:text-ink transition-colors">Privasi</a>
-            <a href="#" onClick={(e) => e.preventDefault()} className="hover:text-ink transition-colors">Syarat &amp; Ketentuan</a>
+            <Link to="/privasi" className="hover:text-ink transition-colors">Privasi</Link>
+            <Link to="/syarat-ketentuan" className="hover:text-ink transition-colors">Syarat &amp; Ketentuan</Link>
             <a href="#keamanan" className="hover:text-ink transition-colors">Keamanan</a>
             <a href="#" onClick={(e) => e.preventDefault()} className="hover:text-ink transition-colors">Status</a>
           </span>

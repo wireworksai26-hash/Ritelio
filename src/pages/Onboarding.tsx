@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -301,6 +301,17 @@ export default function Onboarding() {
                       {ownerProblem}
                     </p>
                   )}
+                  <p className="text-caption text-fossil">
+                    Dengan melanjutkan, kamu menyetujui{' '}
+                    <Link to="/syarat-ketentuan" target="_blank" rel="noreferrer" className="text-ink underline underline-offset-4">
+                      Syarat &amp; Ketentuan
+                    </Link>{' '}
+                    dan{' '}
+                    <Link to="/privasi" target="_blank" rel="noreferrer" className="text-ink underline underline-offset-4">
+                      Kebijakan Privasi
+                    </Link>
+                    .
+                  </p>
                 </div>
               </div>
             )}
