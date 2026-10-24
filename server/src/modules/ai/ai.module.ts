@@ -11,6 +11,6 @@ import { OcrService } from './ocr.service';
   imports: [PayablesModule],
   controllers: [AiController],
   providers: [AiService, AiRouterService, FastPathService, NimService, OcrService],
-  exports: [OcrService],
+  exports: [OcrService, NimService],
 })
 export class AiModule {}

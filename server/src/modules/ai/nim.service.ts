@@ -129,6 +129,47 @@ export class NimService {
     return { text: redactSensitive(content), raw: parsed, model };
   }
 
+  /**
+   * Panggilan model serbaguna tanpa cache dan tanpa kuota tenant, untuk tugas platform (mis. menganalisis
+   * pengajuan calon klien). Pemanggil wajib sudah menyamarkan data pribadi sebelum memanggil ini.
+   */
+  async complete(input: {
+    system: string;
+    user: string;
+    maxTokens?: number;
+    temperature?: number;
+  }): Promise<{ text: string; model: string }> {
+    const baseUrl = (process.env.NIM_BASE_URL ?? 'https://integrate.api.nvidia.com/v1').replace(/\/$/, '');
+    const apiKey = process.env.NIM_API_KEY;
+    const model = process.env.NIM_MODEL ?? 'meta/llama-3.1-8b-instruct';
+    if (!apiKey) throw new NimNotConfiguredError();
+
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: input.system },
+          { role: 'user', content: input.user },
+        ],
+        temperature: input.temperature ?? 0.2,
+        max_tokens: input.maxTokens ?? 700,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      this.logger.warn(`NIM error ${res.status}: ${body.slice(0, 200)}`);
+      throw new Error(`NVIDIA NIM mengembalikan status ${res.status}`);
+    }
+    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const content = data.choices?.[0]?.message?.content?.trim();
+    if (!content) throw new Error('Respons NIM kosong');
+    return { text: content, model };
+  }
+
   async answer(tenantId: string, question: string, snapshot: string): Promise<NimAnswer> {
     const baseUrl = (process.env.NIM_BASE_URL ?? 'https://integrate.api.nvidia.com/v1').replace(/\/$/, '');
     const apiKey = process.env.NIM_API_KEY;

@@ -72,3 +72,16 @@ describe('validateConfig lama trial dan kuota AI', () => {
     expect(() => validateConfig({ ...base, AI_QUOTA_CUSTOM: 'tak terbatas' })).toThrow(/AI_QUOTA_CUSTOM/);
   });
 });
+
+describe('validateConfig rahasia webhook formulir', () => {
+  it('tidak diisi atau kuat: lolos', () => {
+    expect(() => validateConfig({ ...base })).not.toThrow();
+    expect(() => validateConfig({ ...base, INTAKE_WEBHOOK_SECRET: 'c'.repeat(40) })).not.toThrow();
+  });
+
+  it('terlalu pendek, nilai contoh, atau sama dengan rahasia JWT: ditolak', () => {
+    expect(() => validateConfig({ ...base, INTAKE_WEBHOOK_SECRET: 'pendek' })).toThrow(/INTAKE_WEBHOOK_SECRET minimal/);
+    expect(() => validateConfig({ ...base, INTAKE_WEBHOOK_SECRET: 'ganti-dengan-' + 'x'.repeat(40) })).toThrow(/nilai contoh/);
+    expect(() => validateConfig({ ...base, INTAKE_WEBHOOK_SECRET: base.JWT_SECRET })).toThrow(/berbeda dari rahasia JWT/);
+  });
+});

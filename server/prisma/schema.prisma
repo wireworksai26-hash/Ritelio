@@ -3011,3 +3011,37 @@ model AuthAttempt {
   @@index([updatedAt])
   @@map("auth_attempts")
 }
+
+/// Pengajuan calon klien dari formulir luar (Google Form) yang dikirim lewat webhook bertanda tangan.
+/// Data tingkat platform (bukan milik tenant): hanya superadmin yang dapat membacanya. `answers` menyimpan
+/// semua pertanyaan dan jawaban apa adanya; kolom kontak/usaha hanyalah hasil ekstraksi untuk daftar dan pencarian.
+model IntakeSubmission {
+  id             String    @id @default(uuid())
+  source         String    @default("google_form")
+  /// ID respons dari Google. Unik, supaya pengiriman ulang (retry skrip) tidak membuat data ganda.
+  externalId     String    @unique @map("external_id")
+  formId         String?   @map("form_id")
+  submittedAt    DateTime  @map("submitted_at")
+  contactName    String?   @map("contact_name")
+  contactEmail   String?   @map("contact_email")
+  contactPhone   String?   @map("contact_phone")
+  businessType   String?   @map("business_type")
+  employeeRange  String?   @map("employee_range")
+  /// [{ question: string, answer: string | string[] }]
+  answers        Json
+  /// new | contacted | qualified | closed
+  status         String    @default("new")
+  notes          String    @default("")
+  /// pending | done | skipped | failed
+  analysisStatus String    @default("pending") @map("analysis_status")
+  analysis       Json?
+  analysisModel  String?   @map("analysis_model")
+  analysisError  String?   @map("analysis_error")
+  analyzedAt     DateTime? @map("analyzed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@map("intake_submissions")
+}

@@ -76,6 +76,18 @@ export function validateConfig(config: EnvConfig): EnvConfig {
   // Lama trial dan kuota AI per paket (opsional; bila kosong memakai bawaan di plans.config).
   errors.push(...planConfigProblems(config));
 
+  // Rahasia bersama webhook Google Form (opsional). Bila diisi harus kuat, karena endpoint-nya publik.
+  const intakeSecret = config.INTAKE_WEBHOOK_SECRET?.trim();
+  if (intakeSecret) {
+    if (intakeSecret.length < MIN_SECRET_LENGTH) errors.push(`INTAKE_WEBHOOK_SECRET minimal ${MIN_SECRET_LENGTH} karakter`);
+    if (PLACEHOLDER_MARKERS.some((marker) => intakeSecret.toLowerCase().includes(marker))) {
+      errors.push('INTAKE_WEBHOOK_SECRET masih memakai nilai contoh — ganti dengan string acak');
+    }
+    if (intakeSecret === jwtSecret || intakeSecret === jwtRefreshSecret) {
+      errors.push('INTAKE_WEBHOOK_SECRET harus berbeda dari rahasia JWT');
+    }
+  }
+
   // CORS: dengan credentials:true, wildcard tidak boleh dipakai; di produksi origin wajib eksplisit.
   const isProduction = config.NODE_ENV === 'production';
   const corsOrigins = resolveCorsOrigins(config);
