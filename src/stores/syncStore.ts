@@ -56,6 +56,13 @@ export const useSyncStore = create<SyncState>()(
               return t;
             }),
           }));
+          if (result.held) {
+            toast({
+              title: 'Transaksi tertahan di perangkat ini',
+              description: `${result.held} Transaksi tetap tersimpan dan terkirim otomatis setelah akun aktif kembali.`,
+              icon: 'warning',
+            });
+          }
           if (result.rejected.length > 0) {
             toast({
               title: `${result.rejected.length} transaksi ditolak server dan perlu ditinjau`,

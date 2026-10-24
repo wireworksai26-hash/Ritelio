@@ -79,4 +79,43 @@ describe('respons yang bukan dari API', () => {
     const api = await loadApi({ dev: false, apiUrl: 'https://api.contoh.app' });
     await expect(api.apiFetch('/v1/crm/leads')).rejects.toThrow('Terlalu banyak permintaan');
   });
+
+  it('403 dengan kode akun: galat membawa status dan kode, dan memicu event akses terbatas', async () => {
+    const dispatch = vi.fn(() => true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ message: 'Akun hanya bisa dibaca.', code: 'SUBSCRIPTION_READ_ONLY' }), {
+          status: 403,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {}, removeItem: () => {} });
+    vi.stubGlobal('window', { location: { href: 'https://app.contoh.app/' }, dispatchEvent: dispatch });
+    const api = await loadApi({ dev: false, apiUrl: 'https://api.contoh.app' });
+    const err: any = await api.apiFetch('/v1/sales/transactions', { method: 'POST' }).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).toBeInstanceOf(api.ApiRequestError);
+    expect(err).toMatchObject({ status: 403, code: 'SUBSCRIPTION_READ_ONLY', message: 'Akun hanya bisa dibaca.' });
+    expect(api.isAccessRestricted(err)).toBe(true);
+    const event = (dispatch.mock.calls as unknown as Array<[CustomEvent]>)[0][0];
+    expect(event.type).toBe(api.ACCESS_RESTRICTED_EVENT);
+    expect(event.detail).toEqual({ code: 'SUBSCRIPTION_READ_ONLY', message: 'Akun hanya bisa dibaca.' });
+  });
+
+  it('403 biasa (tanpa kode akun) tidak memicu event dan bukan penolakan akun', async () => {
+    const dispatch = vi.fn(() => true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ message: 'Akses ditolak.' }), { status: 403, headers: { 'content-type': 'application/json' } })),
+    );
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {}, removeItem: () => {} });
+    vi.stubGlobal('window', { location: { href: 'https://app.contoh.app/' }, dispatchEvent: dispatch });
+    const api = await loadApi({ dev: false, apiUrl: 'https://api.contoh.app' });
+    const err: any = await api.apiFetch('/v1/finance/entries').catch((e) => e);
+    expect(err.status).toBe(403);
+    expect(api.isAccessRestricted(err)).toBe(false);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
 });

@@ -37,6 +37,10 @@ import type { IndustryTemplate, NotificationType, Role, SubscriptionPlan, Tenant
 interface ApiTenant extends Tenant {
   status: 'active' | 'suspended' | 'trial';
   modules: Record<string, boolean>;
+  /** Dari langganan yang sebenarnya dipakai login dan AI (opsional: server lama tidak mengirimnya). */
+  access_mode?: 'full' | 'read_only' | 'suspended';
+  trial_ends_at?: string | null;
+  ai_quota_unlimited?: boolean;
 }
 
 interface ApiUser {
@@ -961,11 +965,13 @@ function TenantsTab({
                     <Badge variant={isSuspended ? 'ink' : t.status === 'trial' ? 'accent' : 'neutral'}>
                       {statusLabels[t.status]}
                     </Badge>
+                    {t.access_mode === 'read_only' && <Badge variant="outline">Baca saja</Badge>}
                   </div>
                   <p className="text-caption text-fossil break-words">
                     <span className="font-mono">{t.id}</span>, sejak {formatDate(t.created_at ?? new Date().toISOString())},{' '}
                     {formatNumber(t.outlets_count ?? 0)} outlet, {formatNumber(t.users_count ?? 0)} akun
                     {moduleTotal > 0 && `, ${activeModules} dari ${moduleTotal} modul aktif`}
+                    {t.trial_ends_at && `, trial berakhir ${formatDate(t.trial_ends_at)}`}
                   </p>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 text-caption text-smoke">
                     <span>

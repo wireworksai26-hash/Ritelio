@@ -2,14 +2,32 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Role, User } from '../types';
 import { isNetworkError } from '../lib/offline';
-import { SESSION_EXPIRED_EVENT, apiConfigured, apiFetch, clearTokens, revokeSession, setTokens } from '../lib/api';
+import {
+  ACCESS_RESTRICTED_EVENT,
+  SESSION_EXPIRED_EVENT,
+  SUSPENDED_CODE,
+  apiConfigured,
+  apiFetch,
+  clearTokens,
+  revokeSession,
+  setTokens,
+} from '../lib/api';
 import { useBusinessStore } from './businessStore';
 import { useOutletStore } from './outletStore';
+import { useAccessStore, type AccessMode } from './accessStore';
+import { toast } from './toastStore';
 
 interface LoginResponse {
   accessToken: string;
   refreshToken: string;
   user: { id: string; tenantId: string; name: string; email: string; role: Role; tenantName: string; plan: string };
+  /** Keadaan akses akun dari server; dipakai langsung supaya banner dan tombol terkunci sejak halaman pertama. */
+  access?: { mode?: AccessMode; reason?: string; endsAt?: string | null };
+}
+
+function applyAccess(res: LoginResponse): void {
+  if (!res.access?.mode) return;
+  useAccessStore.setState({ access: { mode: res.access.mode, reason: res.access.reason ?? 'ok', endsAt: res.access.endsAt ?? null } });
 }
 
 export interface RegisterOwnerInput {
@@ -56,6 +74,7 @@ export const useAuthStore = create<AuthState>()(
               body: JSON.stringify({ email: cleanEmail, password: cleanPassword }),
             });
             setTokens(res.accessToken, res.refreshToken);
+            applyAccess(res);
             const user = userFromResponse(res);
             set({ user });
 
@@ -181,6 +200,7 @@ export const useAuthStore = create<AuthState>()(
           }),
         });
         setTokens(res.accessToken, res.refreshToken);
+        applyAccess(res);
         const user = userFromResponse(res);
         set({ user });
         useBusinessStore.getState().fetchBusinessData().catch(() => {});
@@ -232,6 +252,7 @@ export const useAuthStore = create<AuthState>()(
         // lalu hapus sesi lokal segera.
         void revokeSession().catch(() => {});
         clearTokens();
+        useAccessStore.getState().reset();
         set({ user: null });
       },
     }),
@@ -241,7 +262,21 @@ export const useAuthStore = create<AuthState>()(
 
 // Refresh token ditolak server (kedaluwarsa/dicabut/reuse): kosongkan sesi agar router mengarahkan ke login.
 if (typeof window !== 'undefined') {
-  window.addEventListener(SESSION_EXPIRED_EVENT, () => useAuthStore.setState({ user: null }));
+  window.addEventListener(SESSION_EXPIRED_EVENT, () => {
+    useAccessStore.getState().reset();
+    useAuthStore.setState({ user: null });
+  });
+
+  // Tenant ditangguhkan saat sesi masih berjalan: server menolak semua permintaan, jadi keluarkan pengguna ke login.
+  // Saat belum masuk (percobaan login ditolak) pesan sudah tampil di halaman login.
+  window.addEventListener(ACCESS_RESTRICTED_EVENT, (event) => {
+    const detail = (event as CustomEvent<{ code?: string; message?: string }>).detail;
+    if (detail?.code !== SUSPENDED_CODE || !useAuthStore.getState().user) return;
+    clearTokens();
+    useAccessStore.getState().reset();
+    useAuthStore.setState({ user: null });
+    toast({ title: 'Akun ditangguhkan', description: detail.message, icon: 'warning' });
+  });
 }
 
 export function homePathFor(role?: Role): string {

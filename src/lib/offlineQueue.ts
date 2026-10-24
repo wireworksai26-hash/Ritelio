@@ -1,3 +1,4 @@
+import { isAccessRestricted } from './api';
 import { isNetworkError } from './offline';
 import type { SalesTransaction } from '../types';
 
@@ -36,15 +37,20 @@ export interface FlushResult {
   accepted: string[];
   /** Ditolak server dengan alasan; tidak akan berhasil bila diulang apa adanya. */
   rejected: Array<{ id: string; reason: string }>;
-  /** Masih menunggu: jaringan putus sebelum sempat dikirim. */
+  /** Masih menunggu: jaringan putus sebelum sempat dikirim, atau ditahan karena keadaan akun. */
   remaining: SalesTransaction[];
+  /** Pesan server bila pengiriman ditahan karena akun baca saja/ditangguhkan; transaksi tetap di antrean. */
+  held?: string;
 }
 
 /**
  * Kirim antrean satu per satu, berurutan. Server idempoten lewat clientGeneratedId,
  * jadi mengulang pengiriman aman. Galat jaringan menghentikan proses (sisa tetap
  * antre); penolakan server hanya menandai transaksi itu dan lanjut ke berikutnya,
- * supaya satu transaksi buruk tidak memblokir sisanya.
+ * supaya satu transaksi buruk tidak memblokir sisanya. Penolakan karena keadaan akun
+ * (baca saja/ditangguhkan) bukan kesalahan transaksi: pengiriman berhenti dan seluruh
+ * sisa, termasuk transaksi itu, tetap di antrean supaya uang yang sudah diterima toko
+ * tidak hilang dan terkirim begitu akun aktif kembali.
  */
 export async function flushSaleQueue(
   queue: SalesTransaction[],
@@ -52,6 +58,7 @@ export async function flushSaleQueue(
 ): Promise<FlushResult> {
   const accepted: string[] = [];
   const rejected: Array<{ id: string; reason: string }> = [];
+  let held: string | undefined;
   let index = 0;
   for (; index < queue.length; index++) {
     const tx = queue[index];
@@ -61,8 +68,12 @@ export async function flushSaleQueue(
       accepted.push(id);
     } catch (err) {
       if (isNetworkError(err)) break;
+      if (isAccessRestricted(err)) {
+        held = err.message;
+        break;
+      }
       rejected.push({ id, reason: err instanceof Error ? err.message : 'Ditolak server.' });
     }
   }
-  return { accepted, rejected, remaining: queue.slice(index) };
+  return { accepted, rejected, remaining: queue.slice(index), ...(held ? { held } : {}) };
 }

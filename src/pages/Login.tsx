@@ -8,6 +8,7 @@ import { Modal } from '../components/ui/Modal';
 import { Icon, type IconName } from '../components/icons/Icon';
 import { Logo } from '../components/layout/Logo';
 import { Reveal } from '../components/Reveal';
+import { isAccessRestricted } from '../lib/api';
 import { homePathFor, useAuthStore } from '../stores/authStore';
 import { useBusinessStore } from '../stores/businessStore';
 import { toast } from '../stores/toastStore';
@@ -94,6 +95,11 @@ export default function Login() {
       toast({ title: `Selamat datang, ${u.name}!`, icon: 'check' });
       navigate(homePathFor(u.role));
     } catch (err: any) {
+      // Akun ditangguhkan bukan salah sandi: tampilkan alasannya tanpa menghitung percobaan gagal.
+      if (isAccessRestricted(err)) {
+        toast({ title: 'Akun tidak dapat masuk', description: err.message, icon: 'warning' });
+        return;
+      }
       const nextFailed = failedAttempts + 1;
       setFailedAttempts(nextFailed);
 

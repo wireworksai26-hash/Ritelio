@@ -45,10 +45,38 @@ export function clearTokens(): void {
 
 interface ApiError {
   message?: string;
+  /** Kode mesin dari server pada penolakan akses akun (lihat READ_ONLY_CODE / SUSPENDED_CODE). */
+  code?: string;
 }
 
 /** Dikirim saat refresh token ditolak (kedaluwarsa/dicabut). authStore mendengarkan dan mengosongkan sesi. */
 export const SESSION_EXPIRED_EVENT = 'retalio:session-expired';
+
+/** Kode 403 dari server (common/subscription/access-state.ts): akun baca saja karena trial/langganan berakhir. */
+export const READ_ONLY_CODE = 'SUBSCRIPTION_READ_ONLY';
+/** Kode 403 dari server: tenant ditangguhkan. */
+export const SUSPENDED_CODE = 'TENANT_SUSPENDED';
+
+/** Dikirim saat server menolak karena keadaan akun (baca saja / ditangguhkan); detail berisi code dan message. */
+export const ACCESS_RESTRICTED_EVENT = 'retalio:access-restricted';
+
+/** Galat dari server dengan status HTTP dan kode mesin, tetap sebuah Error biasa bagi pemanggil lama. */
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/** Penolakan karena keadaan akun, bukan kesalahan data: aman ditahan dan dicoba lagi setelah akun aktif. */
+export function isAccessRestricted(err: unknown): err is ApiRequestError {
+  return err instanceof ApiRequestError && (err.code === READ_ONLY_CODE || err.code === SUSPENDED_CODE);
+}
 
 const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout'];
 const isAuthPath = (path: string): boolean => AUTH_PATHS.some((p) => path.includes(p));
@@ -183,6 +211,12 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, timeo
   }
 
   const body = (await res.json().catch(() => ({}))) as ApiError & T;
-  if (!res.ok) throw new Error(body.message ?? `HTTP ${res.status}`);
+  if (!res.ok) {
+    const error = new ApiRequestError(body.message ?? `HTTP ${res.status}`, res.status, body.code);
+    if (res.status === 403 && isAccessRestricted(error)) {
+      window.dispatchEvent(new CustomEvent(ACCESS_RESTRICTED_EVENT, { detail: { code: error.code, message: error.message } }));
+    }
+    throw error;
+  }
   return body;
 }

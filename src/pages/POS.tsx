@@ -13,6 +13,7 @@ import { ReceiptPrintSheet, type ReceiptData } from '../components/pos/ReceiptPr
 import { categoryName, productName, stockTotal } from '../lib/stats';
 import { useAuthStore } from '../stores/authStore';
 import { useBusinessStore } from '../stores/businessStore';
+import { useAccessStore } from '../stores/accessStore';
 import { cartCount, cartTotal, useCartStore } from '../stores/cartStore';
 import { useSyncStore } from '../stores/syncStore';
 import { toast } from '../stores/toastStore';
@@ -40,6 +41,8 @@ export default function POS() {
   const allStocks = useBusinessStore((s) => s.stocks);
   const tenant = useBusinessStore((s) => s.tenant);
   const allCustomers = useBusinessStore((s) => s.customers);
+  // Akun baca saja (trial/langganan berakhir): server menolak transaksi baru, jadi jangan beri kesan berhasil.
+  const readOnly = useAccessStore((s) => s.access?.mode === 'read_only');
 
   const products = useMemo(() => {
     return allProducts.filter((p) => p.tenant_id === tenant.id || (!p.tenant_id && tenant.id === 'tenant-newsem'));
@@ -97,6 +100,7 @@ export default function POS() {
   }, [filtered, page, stockMap]);
 
   function onPay() {
+    if (readOnly) return;
     const now = new Date().toISOString();
     const invoiceNum = `INV-${Date.now().toString().slice(-6)}`;
     const tx: SalesTransaction = {
@@ -227,7 +231,12 @@ export default function POS() {
       </div>
 
       <div className="p-5 pt-2">
-        <Button full size="lg" icon="check" disabled={items.length === 0} onClick={onPay}>
+        {readOnly && (
+          <p role="alert" className="mb-2 text-center text-caption text-fossil">
+            Akun hanya bisa dibaca, jadi transaksi baru belum bisa dicatat.
+          </p>
+        )}
+        <Button full size="lg" icon="check" disabled={items.length === 0 || readOnly} onClick={onPay}>
           Bayar
         </Button>
         {items.length > 0 && (
