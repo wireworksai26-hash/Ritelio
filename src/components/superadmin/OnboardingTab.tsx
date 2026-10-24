@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { buildMailtoUrl, buildWhatsAppUrl } from '../../config/contact';
+import { buildMailtoUrl, buildWhatsAppUrl, ONBOARDING_FORM_URL } from '../../config/contact';
 import { apiFetch } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
 import { useResource } from '../../lib/useResource';
@@ -62,6 +62,16 @@ export function OnboardingTab() {
   const rows = list.data?.data ?? [];
   const total = list.data?.meta.total ?? 0;
 
+  async function copyFormLink() {
+    if (!ONBOARDING_FORM_URL) return;
+    try {
+      await navigator.clipboard.writeText(ONBOARDING_FORM_URL);
+      toast({ title: 'Tautan formulir disalin.', icon: 'check' });
+    } catch {
+      toast({ title: 'Browser tidak mengizinkan menyalin otomatis.', icon: 'warning' });
+    }
+  }
+
   return (
     <div className="space-y-4">
       <Card className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-end justify-between gap-3">
@@ -93,6 +103,29 @@ export function OnboardingTab() {
             {list.loading ? 'Memuat...' : 'Muat Ulang'}
           </Button>
         </div>
+      </Card>
+
+      <Card className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3" aria-label="Tautan formulir untuk klien">
+        <div className="min-w-0">
+          <p className="text-[15px] text-ink">Tautan formulir untuk klien</p>
+          {ONBOARDING_FORM_URL ? (
+            <p className="text-body-sm text-fossil mt-0.5 break-all">{ONBOARDING_FORM_URL}</p>
+          ) : (
+            <p className="text-body-sm text-fossil mt-0.5">
+              Belum diatur. Isi variabel <span className="font-mono">VITE_ONBOARDING_FORM_URL</span> dengan alamat Google Form 2, lalu build ulang.
+            </p>
+          )}
+        </div>
+        {ONBOARDING_FORM_URL && (
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="ghost" size="sm" icon="document" onClick={() => void copyFormLink()}>
+              Salin tautan
+            </Button>
+            <a href={ONBOARDING_FORM_URL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-ash px-3.5 py-2 text-[14px] text-ink hover:bg-sand">
+              Buka formulir
+            </a>
+          </div>
+        )}
       </Card>
 
       {list.error && (

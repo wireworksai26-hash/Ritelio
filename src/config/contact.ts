@@ -61,3 +61,6 @@ export function salesMailtoUrl(subject?: string, body?: string): string {
 
 /** Tautan formulir konsultasi (VITE_INTAKE_FORM_URL), atau null bila belum diatur. */
 export const INTAKE_FORM_URL = normalizeFormUrl(env.VITE_INTAKE_FORM_URL);
+
+/** Tautan formulir data awal klien (VITE_ONBOARDING_FORM_URL), dikirim sales ke klien setelah berlangganan; null bila belum diatur. */
+export const ONBOARDING_FORM_URL = normalizeFormUrl(env.VITE_ONBOARDING_FORM_URL);

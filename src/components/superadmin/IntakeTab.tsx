@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { buildMailtoUrl, buildWhatsAppUrl } from '../../config/contact';
+import { buildMailtoUrl, buildWhatsAppUrl, ONBOARDING_FORM_URL } from '../../config/contact';
 import { apiFetch } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
 import { useResource } from '../../lib/useResource';
@@ -221,6 +221,9 @@ function IntakeDetail({ id, onClose, onChanged }: { id: string; onClose: () => v
   const greeting = `Halo${d?.contactName ? ` ${d.contactName}` : ''}, terima kasih sudah mengisi formulir konsultasi Retalio. Kami ingin membantu menyiapkan konsultasinya.`;
   const whatsapp = d?.contactPhone ? buildWhatsAppUrl(d.contactPhone, greeting) : null;
   const a = d?.analysis ?? null;
+  // Setelah klien berlangganan, sales mengirim tautan Google Form 2 (data awal akun) langsung dari sini.
+  const onboardingMessage = `Halo${d?.contactName ? ` ${d.contactName}` : ''}, terima kasih sudah berlangganan Retalio. Mohon isi data awal usaha Anda di sini agar akun bisa kami siapkan: ${ONBOARDING_FORM_URL ?? ''}`;
+  const onboardingWhatsapp = ONBOARDING_FORM_URL && d?.contactPhone ? buildWhatsAppUrl(d.contactPhone, onboardingMessage) : null;
 
   return (
     <Modal open onClose={onClose} title={d?.contactName ?? 'Pengajuan calon klien'} maxWidth="xl">
@@ -239,6 +242,12 @@ function IntakeDetail({ id, onClose, onChanged }: { id: string; onClose: () => v
               <a href={buildMailtoUrl(d.contactEmail, 'Konsultasi Retalio', greeting)} className="inline-flex items-center gap-2 rounded-lg border border-ash px-3.5 py-2 text-[14px] text-ink hover:bg-sand">
                 <Icon name="mail" size={15} />
                 {d.contactEmail}
+              </a>
+            )}
+            {onboardingWhatsapp && (
+              <a href={onboardingWhatsapp} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-ash px-3.5 py-2 text-[14px] text-ink hover:bg-sand">
+                <Icon name="chat" size={15} />
+                Kirim tautan Formulir 2 (setelah berlangganan)
               </a>
             )}
             {!whatsapp && !d.contactEmail && <p className="text-body-sm text-fossil">Tidak ada kontak yang terbaca dari formulir.</p>}
