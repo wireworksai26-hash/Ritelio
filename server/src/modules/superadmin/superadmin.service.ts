@@ -22,6 +22,7 @@ import type {
   UpdateSuperadminTenantDto,
   UpdateSuperadminUserDto,
 } from './dto/superadmin.dto';
+import { defaultAiQuotaFor, subscriptionChangeFor } from './subscription-sync';
 import { platformOnlyFieldsIn } from './tenant-change-policy';
 
 const DEFAULT_MODULES = [
@@ -201,8 +202,7 @@ export class SuperadminService {
       throw new ForbiddenException('Hanya superadmin platform yang dapat membuat tenant baru.');
     }
     const plan = dto.subscriptionPlan ?? 'plus_ai';
-    const defaultQuota = plan === 'basic' ? 0 : plan === 'plus_ai' ? 3000 : 25000;
-    const aiQuotaLimit = dto.aiQuotaLimit ?? defaultQuota;
+    const aiQuotaLimit = dto.aiQuotaLimit ?? defaultAiQuotaFor(plan);
 
     const created = await this.prisma.$transaction(async (tx) => {
       await tx.currency.upsert({
@@ -355,6 +355,29 @@ export class SuperadminService {
           update: { count: 0 },
           create: { tenantId: id, month, count: 0 },
         });
+      }
+
+      // Login dan kuota AI membaca baris Subscription, jadi perubahan paket/status/kuota harus ikut ditulis ke sana.
+      const change = subscriptionChangeFor({ dto, currentPlan: existing.subscriptionPlan });
+      if (change) {
+        const current = await tx.subscription.findFirst({
+          where: { tenantId: id },
+          orderBy: { startedAt: 'desc' },
+          select: { id: true },
+        });
+        if (current) {
+          await tx.subscription.update({ where: { id: current.id }, data: change });
+        } else {
+          await tx.subscription.create({
+            data: {
+              tenantId: id,
+              plan: change.plan ?? tenant.subscriptionPlan,
+              status: change.status ?? 'active',
+              aiQuota: change.aiQuota ?? defaultAiQuotaFor(tenant.subscriptionPlan),
+              endsAt: change.endsAt ?? null,
+            },
+          });
+        }
       }
 
       if (dto.modules && typeof dto.modules === 'object') {

@@ -24,6 +24,11 @@ describe('SuperadminService', () => {
       aiUsageCounter: {
         upsert: vi.fn().mockResolvedValue({}),
       },
+      subscription: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'sub-1' }),
+        update: vi.fn().mockResolvedValue({}),
+        create: vi.fn().mockResolvedValue({}),
+      },
       moduleCatalog: {
         findUnique: vi.fn().mockResolvedValue({ key: 'pos' }),
       },
@@ -108,6 +113,52 @@ describe('SuperadminService', () => {
         ).rejects.toThrow(ForbiddenException);
         expect(prisma.$transaction).not.toHaveBeenCalled();
       }
+    });
+  });
+
+  describe('sinkron baris langganan saat superadmin mengubah tenant', () => {
+    const superadmin = { sub: 'u-super', tenantId: 'tenant-global', role: 'superadmin', email: 'superadmin@retalio.id' };
+
+    it('status active mengaktifkan langganan terbaru dan menghapus tanggal berakhir (membuka kunci trial)', async () => {
+      const { service, prisma } = createMocks();
+      await service.updateTenant('tenant-global', 'tenant-1', superadmin as any, { status: 'active' });
+      expect(prisma.subscription.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { tenantId: 'tenant-1' }, orderBy: { startedAt: 'desc' } }),
+      );
+      expect(prisma.subscription.update).toHaveBeenCalledWith({
+        where: { id: 'sub-1' },
+        data: { status: 'active', endsAt: null },
+      });
+    });
+
+    it('ganti paket dan kuota ikut ditulis ke langganan (kuota AI memakai baris ini, bukan JSON settings)', async () => {
+      const { service, prisma } = createMocks();
+      await service.updateTenant('tenant-global', 'tenant-1', superadmin as any, {
+        subscriptionPlan: 'custom',
+        aiQuotaLimit: 4000,
+      });
+      expect(prisma.subscription.update).toHaveBeenCalledWith({
+        where: { id: 'sub-1' },
+        data: { plan: 'custom', aiQuota: 4000 },
+      });
+    });
+
+    it('membuat baris langganan bila tenant belum punya', async () => {
+      const { service, prisma } = createMocks();
+      prisma.subscription.findFirst.mockResolvedValue(null);
+      await service.updateTenant('tenant-global', 'tenant-1', superadmin as any, { status: 'active' });
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+      expect(prisma.subscription.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ tenantId: 'tenant-1', status: 'active', endsAt: null }),
+      });
+    });
+
+    it('status suspended dan perubahan nama tidak menyentuh langganan', async () => {
+      const { service, prisma } = createMocks();
+      await service.updateTenant('tenant-global', 'tenant-1', superadmin as any, { status: 'suspended' });
+      await service.updateTenant('tenant-global', 'tenant-1', superadmin as any, { name: 'Nama Baru' });
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+      expect(prisma.subscription.create).not.toHaveBeenCalled();
     });
   });
 
