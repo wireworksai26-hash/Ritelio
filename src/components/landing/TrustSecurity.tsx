@@ -1,4 +1,4 @@
-import { toast } from '../../stores/toastStore';
+import { useContactSalesStore } from '../../stores/contactSalesStore';
 import { Reveal } from '../Reveal';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -32,6 +32,7 @@ const ITEMS = [
 
 // Keamanan: 6 kartu di atas wash chartreuse bermotif dot. Setiap klaim harus bisa dibuktikan dari kode.
 export function TrustSecurity() {
+  const showContactSales = useContactSalesStore((s) => s.show);
   return (
     <section id="keamanan" className="relative overflow-hidden bg-chartreuse py-20 lg:py-24">
       <div aria-hidden="true" className="absolute inset-0 dot-matrix opacity-40" />
@@ -41,9 +42,7 @@ export function TrustSecurity() {
           <div className="mt-6">
             <Button
               className="bg-[#1c1c1c] text-[#ffffff] hover:bg-black"
-              onClick={() =>
-                toast({ title: 'Tim kami akan menghubungimu', description: 'Atau email ke sales@retalio.id', icon: 'mail' })
-              }
+              onClick={() => showContactSales('keamanan dan kebutuhan usaha saya')}
             >
               Hubungi Sales
             </Button>

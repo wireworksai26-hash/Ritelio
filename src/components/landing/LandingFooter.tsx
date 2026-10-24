@@ -1,12 +1,16 @@
 import { useState, type FormEvent } from 'react';
+import { SALES_EMAIL, SALES_WHATSAPP_DISPLAY, salesMailtoUrl, salesWhatsAppUrl } from '../../config/contact';
 import { toast } from '../../stores/toastStore';
+import { Icon } from '../icons/Icon';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+
+const GREETING = 'Halo Tim Retalio, saya ingin konsultasi tentang Retalio.';
 
 const COLUMNS: Array<{ title: string; links: Array<{ label: string; href?: string }> }> = [
   {
     title: 'PERUSAHAAN',
-    links: [{ label: 'Tentang' }, { label: 'Blog' }, { label: 'Karier' }, { label: 'Kontak' }],
+    links: [{ label: 'Tentang' }, { label: 'Blog' }, { label: 'Karier' }, { label: 'Kontak', href: '#kontak' }],
   },
   {
     title: 'PRODUK',
@@ -30,6 +34,7 @@ const COLUMNS: Array<{ title: string; links: Array<{ label: string; href?: strin
 
 export function LandingFooter() {
   const [email, setEmail] = useState('');
+  const whatsapp = salesWhatsAppUrl(GREETING);
 
   const subscribe = (e: FormEvent) => {
     e.preventDefault();
@@ -63,6 +68,26 @@ export function LandingFooter() {
             ))}
           </div>
 
+          <div className="space-y-4">
+          <Card id="kontak" className="p-5 h-fit scroll-mt-24">
+            <p className="text-[15px] text-ink">Konsultasi dengan sales</p>
+            <p className="mt-1 text-body-sm text-fossil">
+              Bingung memilih paket atau ingin tahu apakah Retalio cocok untuk usahamu? Hubungi tim sales kami.
+            </p>
+            <div className="mt-4 space-y-2.5 text-[15px]">
+              {whatsapp && (
+                <a href={whatsapp} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-ink hover:underline underline-offset-4">
+                  <Icon name="chat" size={16} />
+                  WhatsApp {SALES_WHATSAPP_DISPLAY}
+                </a>
+              )}
+              <a href={salesMailtoUrl('Konsultasi Retalio', GREETING)} className="flex items-center gap-2 text-ink hover:underline underline-offset-4">
+                <Icon name="mail" size={16} />
+                {SALES_EMAIL}
+              </a>
+            </div>
+          </Card>
+
           <Card className="p-5 h-fit">
             <p className="text-[15px] text-ink">Insight bisnis tiap minggu</p>
             <p className="mt-1 text-body-sm text-fossil">
@@ -83,6 +108,7 @@ export function LandingFooter() {
               </Button>
             </form>
           </Card>
+          </div>
         </div>
 
         <div

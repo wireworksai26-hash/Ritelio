@@ -11,8 +11,10 @@ import { FeatureTabs } from '../components/landing/FeatureTabs';
 import { FooterCTA } from '../components/landing/FooterCTA';
 import { GlobeStatement } from '../components/landing/GlobeStatement';
 import { Hero } from '../components/landing/Hero';
+import { ContactSalesModal } from '../components/landing/ContactSalesModal';
 import { LandingFooter } from '../components/landing/LandingFooter';
 import { LandingNav } from '../components/landing/LandingNav';
+import { SalesContactBar } from '../components/landing/SalesContactBar';
 import { LogoWall } from '../components/landing/LogoWall';
 import { ModuleGrid } from '../components/landing/ModuleGrid';
 import { Pricing } from '../components/landing/Pricing';
@@ -72,6 +74,8 @@ export default function Landing() {
         />
       </div>
 
+      <SalesContactBar />
+
       {showBar && (
         <div className="relative bg-charcoal text-paper">
           <p className="px-10 py-2.5 text-center text-body-sm">
@@ -126,6 +130,7 @@ export default function Landing() {
       </main>
 
       <LandingFooter />
+      <ContactSalesModal />
     </div>
   );
 }

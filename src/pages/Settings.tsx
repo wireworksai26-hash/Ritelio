@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { CompaniesPanel } from '../components/company/CompaniesPanel';
 import { Reveal } from '../components/Reveal';
 import { Icon, type IconName } from '../components/icons/Icon';
+import { SalesContactLink } from '../components/ui/SalesContactLink';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../components/ui/Card';
@@ -1238,15 +1239,22 @@ export default function Settings() {
               <p className="text-[13.5px] font-semibold text-ink">Ingin berdiskusi dengan tim teknis Retalio?</p>
               <p className="text-[12px] text-fossil">Kami siap menyusun proposal arsitektur dan penawaran sesuai kebutuhan bisnismu.</p>
             </div>
-            <a
-              href="https://wa.me/6281234567890?text=Halo%20Tim%20Retalio,%20saya%20tertarik%20konsultasi%20Paket%20Custom%20Enterprise"
-              target="_blank"
-              rel="noreferrer"
+            <SalesContactLink
+              topic="Paket Custom Enterprise"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-ink text-white text-[13px] font-medium hover:bg-ink/90 transition-colors whitespace-nowrap"
-            >
-              <Icon name="sparkles" size={15} />
-              Chat WhatsApp Enterprise
-            </a>
+              whatsappLabel={
+                <>
+                  <Icon name="sparkles" size={15} />
+                  Chat WhatsApp Enterprise
+                </>
+              }
+              emailLabel={
+                <>
+                  <Icon name="mail" size={15} />
+                  Email Sales Enterprise
+                </>
+              }
+            />
           </div>
         </div>
 

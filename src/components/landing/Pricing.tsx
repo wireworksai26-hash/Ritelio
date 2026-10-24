@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { plans } from '../../data/plans';
 import { cn, formatIDR } from '../../lib/format';
-import { toast } from '../../stores/toastStore';
+import { useContactSalesStore } from '../../stores/contactSalesStore';
 import { Reveal } from '../Reveal';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -16,6 +16,7 @@ type Billing = 'monthly' | 'yearly';
 export function Pricing() {
   const [billing, setBilling] = useState<Billing>('monthly');
   const navigate = useNavigate();
+  const showContactSales = useContactSalesStore((s) => s.show);
 
   return (
     <div className="mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
@@ -93,11 +94,7 @@ export function Pricing() {
                     variant={plan.featured ? 'primary' : 'ghost'}
                     onClick={() => {
                       if (plan.id === 'custom') {
-                        toast({
-                          title: 'Tim sales akan menghubungimu',
-                          description: 'Atau email langsung ke sales@retalio.id',
-                          icon: 'mail',
-                        });
+                        showContactSales('Paket Custom');
                       } else {
                         navigate('/onboarding');
                       }

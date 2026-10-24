@@ -13,6 +13,10 @@ COPY index.html vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.jso
 COPY public ./public
 COPY src ./src
 # VITE_API_URL sengaja tidak diisi: di produksi alamat API = asal yang sama dengan halaman.
+# Kontak sales di halaman depan (opsional). Railway hanya meneruskan variabel service ke build bila dideklarasikan sebagai ARG.
+ARG VITE_SALES_WHATSAPP
+ARG VITE_SALES_EMAIL
+ENV VITE_SALES_WHATSAPP=$VITE_SALES_WHATSAPP VITE_SALES_EMAIL=$VITE_SALES_EMAIL
 RUN npm run build
 
 # ---- 2. Build backend ---------------------------------------------------------------------------
