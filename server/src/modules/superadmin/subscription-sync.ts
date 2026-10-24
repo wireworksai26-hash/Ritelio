@@ -20,12 +20,15 @@ export interface SubscriptionChange {
  *
  * Login dan kuota AI membaca baris Subscription, bukan Tenant.settings. Tanpa sinkron ini, mengubah status
  * menjadi active di panel tidak membuka kunci akun yang masa trial-nya habis, dan kuota yang diatur di panel
- * tidak berefek. Status suspended sengaja tidak diterjemahkan ke langganan: baris yang bukan trialing tidak
- * pernah dikunci saat login, jadi menandainya cancelled justru akan membuka kunci trial yang sudah habis.
+ * tidak berefek. Status suspended sengaja tidak diterjemahkan ke langganan: penangguhan ditegakkan lewat
+ * Tenant.settings.status (lihat common/subscription/access-state), dan mencampurnya dengan status langganan
+ * hanya membuat dua sumber yang bisa saling bertentangan.
  */
 export function subscriptionChangeFor(input: {
   dto: Pick<UpdateSuperadminTenantDto, 'subscriptionPlan' | 'status' | 'aiQuotaLimit'>;
   currentPlan: PlanKey;
+  /** Tenant sedang ditangguhkan: status active berarti membuka penangguhan, bukan mengaktifkan langganan. */
+  wasSuspended?: boolean;
 }): SubscriptionChange | null {
   const { dto, currentPlan } = input;
   const change: SubscriptionChange = {};
@@ -33,7 +36,9 @@ export function subscriptionChangeFor(input: {
   const planChanged = dto.subscriptionPlan !== undefined && dto.subscriptionPlan !== currentPlan;
   if (planChanged) change.plan = dto.subscriptionPlan;
 
-  if (dto.status === 'active') {
+  // Tombol Aktifkan di panel mengirim status active saat membuka penangguhan. Itu tidak boleh mengubah trial menjadi
+  // langganan aktif permanen; mengaktifkan langganan dilakukan pada tenant yang sedang tidak ditangguhkan.
+  if (dto.status === 'active' && !input.wasSuspended) {
     change.status = 'active';
     change.endsAt = null;
   } else if (dto.status === 'trial') {

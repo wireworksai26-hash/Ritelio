@@ -57,6 +57,16 @@ describe('subscriptionChangeFor', () => {
     ).toEqual({ status: 'active', endsAt: null, aiQuota: 800 });
   });
 
+  it('membuka penangguhan (suspended -> active) tidak menyentuh langganan, supaya trial tidak berubah jadi aktif permanen', () => {
+    expect(
+      subscriptionChangeFor({ dto: { status: 'active' }, currentPlan: 'plus_ai', wasSuspended: true }),
+    ).toBeNull();
+    // kuota atau paket yang ikut dikirim tetap diterapkan
+    expect(
+      subscriptionChangeFor({ dto: { status: 'active', aiQuotaLimit: 70 }, currentPlan: 'plus_ai', wasSuspended: true }),
+    ).toEqual({ aiQuota: 70 });
+  });
+
   it('tanpa kolom langganan (mis. hanya nama) tidak menyentuh langganan', () => {
     expect(subscriptionChangeFor({ dto: { name: 'X' } as any, currentPlan: 'plus_ai' })).toBeNull();
   });

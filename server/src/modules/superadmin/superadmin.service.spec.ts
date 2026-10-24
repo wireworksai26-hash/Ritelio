@@ -162,6 +162,79 @@ describe('SuperadminService', () => {
     });
   });
 
+  describe('overview membaca langganan yang sebenarnya dipakai login dan AI', () => {
+    const superadmin = { sub: 'u-super', tenantId: 'tenant-global', role: 'superadmin', email: 'superadmin@retalio.id' };
+    const row = (over: Record<string, unknown>) => ({
+      id: 't1',
+      name: 'Tenant',
+      industryTemplate: 'retail',
+      subscriptionPlan: 'plus_ai',
+      settings: {},
+      createdAt: new Date('2026-10-01T00:00:00Z'),
+      _count: { outlets: 1, users: 1 },
+      usageCounters: [],
+      modulesConfig: [],
+      subscriptions: [],
+      ...over,
+    });
+    const run = async (tenant: Record<string, unknown>) => {
+      const { service, prisma } = createMocks();
+      prisma.tenant.findMany.mockResolvedValue([tenant]);
+      const res: any = await service.overview('tenant-global', superadmin as any);
+      return res.tenants[0];
+    };
+
+    it('tenant trial: status trial, kuota dari langganan (bukan 3000 bawaan panel), tanggal berakhir tampil', async () => {
+      const ends = new Date(Date.now() + 5 * 86_400_000);
+      const t = await run(row({ subscriptions: [{ status: 'trialing', endsAt: ends, aiQuota: 1000 }] }));
+      expect(t).toMatchObject({ status: 'trial', ai_quota_limit: 1000, access_mode: 'full', subscription_status: 'trialing' });
+      expect(t.trial_ends_at).toBe(ends.toISOString());
+    });
+
+    it('trial habis: tetap berstatus trial tetapi access_mode read_only agar panel bisa menandainya', async () => {
+      const t = await run(row({ subscriptions: [{ status: 'trialing', endsAt: new Date(Date.now() - 86_400_000), aiQuota: 1000 }] }));
+      expect(t).toMatchObject({ status: 'trial', access_mode: 'read_only', access_reason: 'trial_expired' });
+    });
+
+    it('langganan aktif memakai kuota dari langganan walau JSON settings berkata lain', async () => {
+      const t = await run(row({ settings: { status: 'trial', aiQuotaLimit: 99999 }, subscriptions: [{ status: 'active', endsAt: null, aiQuota: 2500 }] }));
+      expect(t).toMatchObject({ status: 'active', ai_quota_limit: 2500, trial_ends_at: null, access_mode: 'full' });
+    });
+
+    it('tenant ditangguhkan: status suspended dan access_mode suspended', async () => {
+      const t = await run(row({ settings: { status: 'suspended' }, subscriptions: [{ status: 'active', endsAt: null, aiQuota: 1000 }] }));
+      expect(t).toMatchObject({ status: 'suspended', access_mode: 'suspended' });
+    });
+
+    it('paket custom ditandai tanpa batas kuota AI', async () => {
+      const t = await run(row({ subscriptionPlan: 'custom', subscriptions: [{ status: 'active', endsAt: null, aiQuota: 25000 }] }));
+      expect(t.ai_quota_unlimited).toBe(true);
+    });
+
+    it('tanpa baris langganan memakai cadangan dari settings dan kuota bawaan paket', async () => {
+      const t = await run(row({ settings: { status: 'trial' }, subscriptions: [] }));
+      expect(t).toMatchObject({ status: 'trial', ai_quota_limit: 3000, subscription_status: null });
+    });
+  });
+
+  describe('membuka penangguhan tidak mengubah langganan', () => {
+    const superadmin = { sub: 'u-super', tenantId: 'tenant-global', role: 'superadmin', email: 'superadmin@retalio.id' };
+
+    it('tenant ditangguhkan lalu diaktifkan kembali: baris langganan tidak disentuh (trial tetap trial)', async () => {
+      const { service, prisma } = createMocks();
+      prisma.tenant.findUnique.mockResolvedValue({ id: 'tenant-1', name: 'N', industryTemplate: 'retail', subscriptionPlan: 'plus_ai', settings: { status: 'suspended' } });
+      await service.updateTenant('tenant-global', 'tenant-1', superadmin as any, { status: 'active' });
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+      expect(prisma.subscription.create).not.toHaveBeenCalled();
+    });
+
+    it('tenant tidak ditangguhkan lalu diberi status active: langganan diaktifkan (membuka kunci)', async () => {
+      const { service, prisma } = createMocks();
+      await service.updateTenant('tenant-global', 'tenant-1', superadmin as any, { status: 'active' });
+      expect(prisma.subscription.update).toHaveBeenCalledWith({ where: { id: 'sub-1' }, data: { status: 'active', endsAt: null } });
+    });
+  });
+
   it('mencabut seluruh sesi refresh token saat revokeUserSessions dipanggil superadmin', async () => {
     const { service, prisma, sessions } = createMocks();
     prisma.user.findFirst.mockResolvedValue({

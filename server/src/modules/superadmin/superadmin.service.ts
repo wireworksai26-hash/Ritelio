@@ -22,7 +22,8 @@ import type {
   UpdateSuperadminTenantDto,
   UpdateSuperadminUserDto,
 } from './dto/superadmin.dto';
-import { trialEndsAt } from '../../common/config/plans.config';
+import { paidAiQuotaFor, trialEndsAt } from '../../common/config/plans.config';
+import { accessFor, tenantStatusOf } from '../../common/subscription/access-state';
 import { defaultAiQuotaFor, subscriptionChangeFor } from './subscription-sync';
 import { platformOnlyFieldsIn } from './tenant-change-policy';
 
@@ -61,6 +62,8 @@ export class SuperadminService {
           _count: { select: { outlets: true, users: true } },
           usageCounters: { where: { month: monthKey }, select: { count: true }, take: 1 },
           modulesConfig: { select: { moduleKey: true, isActive: true } },
+          // Langganan terbaru: sumber status trial, kuota AI, dan tanggal berakhir yang sebenarnya dipakai login dan AI.
+          subscriptions: { orderBy: { startedAt: 'desc' }, take: 1, select: { status: true, endsAt: true, aiQuota: true } },
         },
         orderBy: { createdAt: 'desc' },
         take: 100,
@@ -106,16 +109,27 @@ export class SuperadminService {
         t.settings && typeof t.settings === 'object' && !Array.isArray(t.settings)
           ? (t.settings as Record<string, unknown>)
           : {};
-      const defaultLimit =
-        t.subscriptionPlan === 'basic' ? 0 : t.subscriptionPlan === 'plus_ai' ? 3000 : 25000;
-      const aiQuotaLimit =
-        typeof settingsObj.aiQuotaLimit === 'number' ? settingsObj.aiQuotaLimit : defaultLimit;
+      // Status dan kuota dibaca dari baris langganan (yang dipakai login dan AI). JSON settings hanya cadangan
+      // untuk tenant yang belum punya baris langganan.
+      const sub = t.subscriptions[0] ?? null;
+      const access = accessFor({ tenantStatus: tenantStatusOf(settingsObj), subscription: sub });
+      const aiQuotaLimit = sub
+        ? sub.aiQuota
+        : typeof settingsObj.aiQuotaLimit === 'number'
+          ? settingsObj.aiQuotaLimit
+          : paidAiQuotaFor(t.subscriptionPlan);
       const monthlyRevenue =
         typeof settingsObj.monthlyRevenue === 'number' ? settingsObj.monthlyRevenue : 0;
       const status =
-        settingsObj.status === 'suspended' || settingsObj.status === 'trial'
-          ? settingsObj.status
-          : 'active';
+        access.mode === 'suspended'
+          ? 'suspended'
+          : sub
+            ? sub.status === 'trialing'
+              ? 'trial'
+              : 'active'
+            : settingsObj.status === 'trial'
+              ? 'trial'
+              : 'active';
       const modulesMap: Record<string, boolean> = {};
       for (const m of t.modulesConfig) {
         modulesMap[m.moduleKey] = m.isActive;
@@ -133,6 +147,12 @@ export class SuperadminService {
         users_count: t._count.users,
         ai_quota_used: t.usageCounters[0]?.count ?? 0,
         ai_quota_limit: aiQuotaLimit,
+        // Paket custom tidak dibatasi kuota AI (lihat AiService.quotaFor); angka di atas hanya catatan.
+        ai_quota_unlimited: t.subscriptionPlan === 'custom',
+        subscription_status: sub?.status ?? null,
+        trial_ends_at: sub?.status === 'trialing' && sub.endsAt ? sub.endsAt.toISOString() : null,
+        access_mode: access.mode,
+        access_reason: access.reason,
         modules: modulesMap,
         settings: settingsObj,
       };
@@ -297,7 +317,8 @@ export class SuperadminService {
       name: created.name,
       industry_template: created.industryTemplate,
       subscription_plan: created.subscriptionPlan,
-      status: 'active',
+      // Tenant baru dari panel memulai dengan trial (baris langganan trialing), bukan langganan aktif.
+      status: 'trial',
       created_at: created.createdAt.toISOString(),
       monthly_revenue: 0,
       outlets_count: 1,
@@ -358,7 +379,11 @@ export class SuperadminService {
       }
 
       // Login dan kuota AI membaca baris Subscription, jadi perubahan paket/status/kuota harus ikut ditulis ke sana.
-      const change = subscriptionChangeFor({ dto, currentPlan: existing.subscriptionPlan });
+      const change = subscriptionChangeFor({
+        dto,
+        currentPlan: existing.subscriptionPlan,
+        wasSuspended: tenantStatusOf(existing.settings) === 'suspended',
+      });
       if (change) {
         const current = await tx.subscription.findFirst({
           where: { tenantId: id },
